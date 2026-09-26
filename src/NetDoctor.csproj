@@ -15,9 +15,12 @@
     <FileVersion>1.3.0.0</FileVersion>
     <AssemblyVersion>1.3.0.0</AssemblyVersion>
     <Company>xiyanruoxue</Company>
-    <Copyright>网络检测 / 断网修复 / 网络优化</Copyright>
+    <Copyright>网络检测 / 断网修复 / 网络优化 / Windows优化 / 系统工具 / 硬件检测</Copyright>
+    <Description>一体化 Windows 系统工具：网络诊断修复、Windows 优化、垃圾清理、应用/服务/启动项管理、硬件检测与跑分</Description>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
     <DebugType>none</DebugType>
+    <!-- 不要 SourceLink 生成的 +sha 版本后缀，保持发布版本号干净 -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationHighDpiMode>DpiUnaware</ApplicationHighDpiMode>
     <NoWarn>CA1416;WFO5001;WFO1000;WFO0003</NoWarn>
@@ -27,7 +30,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 内置 Windows 优化配置（源自 ZyperWin++ 的声明式配置，编译进 exe，运行时零外部依赖） -->
+    <!-- 内置 Windows 优化定义：本项目自建格式，编译进 exe，运行时零外部依赖 -->
     <EmbeddedResource Include="Data\Optimizations.xml" LogicalName="NetDoctor.Data.Optimizations.xml" />
   </ItemGroup>
 
