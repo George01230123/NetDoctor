@@ -16,7 +16,7 @@ Overview · Network Check · Repair · Network Tuning · Windows Tuning · Syste
 
 ## Download
 
-Grab `夕颜若雪网络工具.exe` (~47 MB) from the [Releases](../../releases) page and **just double-click it** — no .NET installation needed.
+Grab `夕颜若雪网络工具.exe` (~47 MB) from the **Releases** section on the right of the repository page and **just double-click it** — no .NET installation needed.
 
 It will request administrator privileges on first run: repair, tuning, service, startup and cleanup operations all require elevation.
 
