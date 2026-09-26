@@ -1,32 +1,48 @@
 ﻿# 夕颜若雪网络工具 —— 发布脚本
-# 用法： powershell -ExecutionPolicy Bypass -File publish.ps1 [-SkipNative] [-SkipTest]
 #
-#   产出：
-#     publish\夕颜若雪网络工具.exe      单文件自包含主程序（WinForms，无界面依赖）
-#     publish\NetDoctorNative.dll       x86 原生 DLL，给 32 位易语言宿主调用
-#     并复制到 -Target 指定的目录（默认 E:\挂\xiyanruoxue）
+# 用法：
+#   .\publish.ps1                              发布到 publish\，并复制到默认目录（存在才复制）
+#   .\publish.ps1 -Target 'D:\out'             指定复制目标
+#   .\publish.ps1 -NoDeploy                    只产出到 publish\，不复制到任何目录
+#   .\publish.ps1 -SkipNative                  跳过原生 DLL（没装 MSVC 工具链时用）
+#   .\publish.ps1 -SkipTest                    跳过原生 DLL 调用测试
+#
+# 产出：
+#   publish\夕颜若雪网络工具.exe     单文件自包含主程序（WinForms）
+#   publish\NetDoctorNative.dll      x86 原生 DLL，给 32 位易语言宿主调用
 
+[CmdletBinding()]
 param(
-    [string]$Target   = 'E:\挂\xiyanruoxue',
+    [string]$Target,
+    [switch]$NoDeploy,
     [switch]$SkipNative,
     [switch]$SkipTest
 )
 
 $ErrorActionPreference = 'Stop'
-$root    = Split-Path -Parent $MyInvocation.MyCommand.Path
-$src     = Join-Path $root 'src'
-$native  = Join-Path $root 'native'
-$ntest   = Join-Path $root 'native-test'
-$outDir  = Join-Path $root 'publish'
+$root   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$outDir = Join-Path $root 'publish'
 
-Write-Host '=== 1/5 停止正在运行的实例 ===' -ForegroundColor Cyan
+# 默认复制目标：仅当该目录存在时才用（从源码 clone 的人通常没有这个目录）
+$DefaultTarget = 'E:\挂\xiyanruoxue'
+if (-not $Target) {
+    if (Test-Path $DefaultTarget) { $Target = $DefaultTarget }
+    else { $NoDeploy = $true }
+}
+
+function Section($text) { Write-Host "=== $text ===" -ForegroundColor Cyan }
+function Good($text)    { Write-Host "    $text" -ForegroundColor Green }
+function Warn($text)    { Write-Host "    $text" -ForegroundColor Yellow }
+function Dim($text)     { Write-Host "    $text" -ForegroundColor DarkGray }
+
+Section '1/5 停止正在运行的实例'
 Get-Process -Name '夕颜若雪网络工具' -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 800
 
-Write-Host '=== 2/5 发布主程序（单文件自包含）===' -ForegroundColor Cyan
+Section '2/5 发布主程序（单文件自包含）'
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 
-dotnet publish $src `
+dotnet publish (Join-Path $root 'src') `
     -c Release `
     -r win-x64 `
     --self-contained true `
@@ -39,58 +55,71 @@ dotnet publish $src `
 if ($LASTEXITCODE -ne 0) { throw '主程序发布失败' }
 $exe = Join-Path $outDir '夕颜若雪网络工具.exe'
 if (-not (Test-Path $exe)) { throw "未生成 exe：$exe" }
-Write-Host ("    生成成功：夕颜若雪网络工具.exe  ({0} MB)" -f [math]::Round((Get-Item $exe).Length / 1MB, 1)) -ForegroundColor Green
+Good ("夕颜若雪网络工具.exe  {0} MB" -f [math]::Round((Get-Item $exe).Length / 1MB, 1))
+
+$nativeProj = Join-Path $root 'native\NetDoctorNative.csproj'
+if (-not $SkipNative -and -not (Test-Path $nativeProj)) {
+    Warn '未找到 native\NetDoctorNative.csproj，自动跳过原生 DLL'
+    $SkipNative = $true
+}
 
 if (-not $SkipNative) {
-    Write-Host '=== 3/5 发布 x86 原生 DLL（NativeAOT）===' -ForegroundColor Cyan
-    Write-Host '    需要 Visual Studio 的 C++ 生成工具与 Windows SDK' -ForegroundColor DarkGray
-    dotnet publish $native -c Release -r win-x86 --nologo
-    if ($LASTEXITCODE -ne 0) { throw '原生 DLL 发布失败（是否缺少 MSVC 工具链？）' }
+    Section '3/5 发布 x86 原生 DLL（NativeAOT）'
+    Dim '需要 Visual Studio 的 C++ 生成工具与 Windows SDK'
 
-    $dll = Join-Path $native 'bin\Release\net10.0\win-x86\publish\NetDoctorNative.dll'
+    dotnet publish $nativeProj -c Release -r win-x86 --nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw '原生 DLL 发布失败。若本机没有 MSVC 工具链，请改用 -SkipNative 只发布主程序。'
+    }
+
+    $dll = Join-Path $root 'native\bin\Release\net10.0\win-x86\publish\NetDoctorNative.dll'
     if (-not (Test-Path $dll)) { throw "未生成 DLL：$dll" }
     Copy-Item $dll $outDir -Force
-    Write-Host ("    生成成功：NetDoctorNative.dll  ({0} MB)" -f [math]::Round((Get-Item $dll).Length / 1MB, 1)) -ForegroundColor Green
+    Good ("NetDoctorNative.dll  {0} MB" -f [math]::Round((Get-Item $dll).Length / 1MB, 1))
 
-    if (-not $SkipTest) {
-        Write-Host '    正在跑原生 DLL 调用测试（x86 宿主模拟易语言调用）…' -ForegroundColor DarkGray
-        dotnet publish $ntest -c Release -r win-x86 --nologo | Out-Null
-        $tpub = Join-Path $ntest 'bin\Release\net10.0\win-x86\publish'
+    $ntestProj = Join-Path $root 'native-test\NetDoctorNativeTest.csproj'
+    if (-not $SkipTest -and (Test-Path $ntestProj)) {
+        Dim '正在跑原生 DLL 调用测试（x86 宿主模拟易语言调用）…'
+        dotnet publish $ntestProj -c Release -r win-x86 --nologo | Out-Null
+        $tpub = Join-Path $root 'native-test\bin\Release\net10.0\win-x86\publish'
         Copy-Item $dll (Join-Path $tpub 'NetDoctorNative.dll') -Force
         Push-Location $tpub
         & '.\NetDoctorNativeTest.exe' | Select-Object -Last 4
         $code = $LASTEXITCODE
         Pop-Location
         if ($code -ne 0) { throw "原生 DLL 测试未通过（退出码 $code）" }
-        Write-Host '    原生 DLL 测试通过' -ForegroundColor Green
+        Good '原生 DLL 测试通过'
     }
 } else {
-    Write-Host '=== 3/5 跳过原生 DLL（-SkipNative）===' -ForegroundColor DarkGray
+    Section '3/5 跳过原生 DLL'
 }
 
-Write-Host '=== 4/5 复制到目标目录 ===' -ForegroundColor Cyan
-if (-not (Test-Path $Target)) {
-    Write-Host "    目标目录不存在，跳过：$Target" -ForegroundColor Yellow
+Section '4/5 复制到目标目录'
+if ($NoDeploy) {
+    Dim '未指定目标目录（-NoDeploy，或默认目录不存在），产物只在 publish\'
 } else {
+    if (-not (Test-Path $Target)) {
+        New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    }
     Copy-Item $exe (Join-Path $Target '夕颜若雪网络工具.exe') -Force
-    Write-Host "    已复制：夕颜若雪网络工具.exe" -ForegroundColor Green
+    Good '已复制：夕颜若雪网络工具.exe'
 
     $dllOut = Join-Path $outDir 'NetDoctorNative.dll'
     if (Test-Path $dllOut) {
         Copy-Item $dllOut (Join-Path $Target 'NetDoctorNative.dll') -Force
-        Write-Host "    已复制：NetDoctorNative.dll" -ForegroundColor Green
+        Good '已复制：NetDoctorNative.dll'
     }
 
     $doc = Join-Path $root 'docs\使用说明.md'
     if (Test-Path $doc) {
         Copy-Item $doc (Join-Path $Target '网络工具-使用说明.md') -Force
-        Write-Host "    已复制：网络工具-使用说明.md" -ForegroundColor Green
+        Good '已复制：网络工具-使用说明.md'
     }
 }
 
-Write-Host '=== 5/5 完成 ===' -ForegroundColor Cyan
+Section '5/5 完成'
 Get-ChildItem $outDir | ForEach-Object {
-    Write-Host ("    {0,-30} {1,8:N2} MB" -f $_.Name, ($_.Length / 1MB))
+    Dim ("{0,-28} {1,8:N2} MB" -f $_.Name, ($_.Length / 1MB))
 }
-Write-Host '    运行记录：logs\NetDoctor_YYYYMMDD.log'
-Write-Host '    改动前快照：backup\backup.ini'
+Dim '运行记录：logs\NetDoctor_YYYYMMDD.log'
+Dim '改动前快照：backup\backup.ini'

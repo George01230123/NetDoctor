@@ -35,6 +35,8 @@
 Releases 里同时提供 **`NetDoctorNative.dll`** —— 给 32 位易语言程序调用的原生接口库，
 详见 [原生接口文档](docs/原生接口.md) 与 [易语言接入指南](docs/易语言接入.md)。
 
+版本历史见 [CHANGELOG.md](CHANGELOG.md)。
+
 ---
 
 ## 两种使用形态
