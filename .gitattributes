@@ -1,0 +1,19 @@
+# 统一换行：源码与脚本用 LF，Windows 批处理保留 CRLF
+* text=auto eol=lf
+
+*.cs      text diff=csharp
+*.csproj  text
+*.xml     text
+*.md      text
+*.ps1     text eol=lf
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制
+*.exe     binary
+*.dll     binary
+*.pdb     binary
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.zip     binary

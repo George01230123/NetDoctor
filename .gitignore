@@ -1,0 +1,36 @@
+# ---- .NET 构建产物 ----
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# ---- 运行期生成 ----
+.runtime/
+backup/
+*.log
+
+# ---- 发布产物（走 GitHub Release，不入库）----
+*.exe
+*.dll
+*.pdb
+*.msi
+
+# ---- 测试与覆盖 ----
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+
+# ---- 工具与编辑器 ----
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini

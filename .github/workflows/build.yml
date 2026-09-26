@@ -1,0 +1,97 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 还原依赖
+        run: dotnet restore src/NetDoctor.csproj
+
+      - name: 构建（Release）
+        run: dotnet build src/NetDoctor.csproj -c Release --no-restore
+
+      - name: 构建自测工程
+        run: dotnet build selftest/SelfTest.csproj -c Release
+
+      # 自测依赖真机网络与硬件，在 CI 上只跑稳定项；
+      # 若失败不阻断发布，仅作为提示。
+      - name: 运行自测（允许失败）
+        continue-on-error: true
+        run: selftest/bin/Release/net10.0-windows/NetDoctorSelfTest.exe
+        shell: cmd
+
+      - name: 发布单文件自包含 exe
+        run: >
+          dotnet publish src/NetDoctor.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none
+          -o publish
+
+      - name: 收集产物信息
+        id: info
+        shell: pwsh
+        run: |
+          $exe = Get-Item 'publish/夕颜若雪网络工具.exe'
+          $mb  = [math]::Round($exe.Length / 1MB, 1)
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "size=$mb"      >> $env:GITHUB_OUTPUT
+          "sha=$sha"      >> $env:GITHUB_OUTPUT
+          Write-Host "产物：$mb MB  SHA256=$sha"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetDoctor-win-x64
+          path: publish/夕颜若雪网络工具.exe
+          if-no-files-found: error
+
+      - name: 附加到 Release（仅打 tag 时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/夕颜若雪网络工具.exe
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body: |
+            ## 夕颜若雪网络工具 ${{ github.ref_name }}
+
+            单文件自包含，**下载后双击即可运行**，无需安装 .NET 运行时。
+            首次运行会请求管理员权限（修复、优化、服务、启动项、清理都需要）。
+
+            - 大小：${{ steps.info.outputs.size }} MB
+            - SHA256：`${{ steps.info.outputs.sha }}`
+
+            ### 功能
+            网络检测 / 断网修复 / 网络优化 · Windows 优化（151 项）
+            · 垃圾清理 / 应用管理 / 系统服务 / 启动项 · 硬件检测 / 工具启动器 / 性能测试 / 屏幕测试
+
+            ### 说明
+            - 所有写操作都会在 `backup/` 下留快照，可对照回滚
+            - 运行日志在 `logs/`，出问题请附日志反馈
+            - 系统优化有风险，请先备份重要数据，详见 README 免责声明
