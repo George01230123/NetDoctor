@@ -18,6 +18,44 @@
 
 首次运行会请求管理员权限（修复、优化、服务、启动项、清理都依赖管理员权限）。
 
+Releases 里同时提供 **`NetDoctorNative.dll`** —— 给 32 位易语言程序调用的原生接口库，
+详见 [原生接口文档](docs/原生接口.md) 与 [易语言接入指南](docs/易语言接入.md)。
+
+---
+
+## 两种使用形态
+
+| 形态 | 产物 | 适用场景 |
+|---|---|---|
+| **独立程序** | `夕颜若雪网络工具.exe`（47 MB 单文件自包含） | 直接双击使用，自带 8 个页面的完整界面 |
+| **原生接口库** | `NetDoctorNative.dll`（6.2 MB，x86） | 给**易语言**等 32 位程序 `LoadLibrary` 调用，功能长在别人界面里 |
+
+原生 DLL 的要点：
+
+- **NativeAOT 编译**，是真正的原生 x86 DLL，**宿主无需安装 .NET 运行时**
+- 15 个 `__stdcall` 导出函数，统一返回 **UTF-8 JSON**，内存由 DLL 自管
+- 与主程序**共用同一份 Core 源码**，不复制代码
+- 已用 x86 测试宿主（模拟易语言调用方式）验证 **32 项断言全部通过**
+- 任何异常都转成 `{"ok":false,...}` 返回，**绝不崩溃宿主**
+
+```c
+const char* ND_Ping(void);                          // 自检，返回 pong
+const char* ND_Version(void);                       // 版本 / 位数 / 是否管理员
+const char* ND_DiagNetwork(int dnsTest);            // 网络诊断
+const char* ND_FixNetwork(int mode);                // 断网修复（轻量 / 一键）
+const char* ND_FixDeep(void);                       // 深度修复（重置 Winsock/TCP-IP）
+const char* ND_DnsBenchmark(int applyBest);         // DNS 择优测速
+const char* ND_DnsRestore(void);                    // 恢复自动获取 DNS
+const char* ND_CleanScan(void);                     // 清扫目标占用扫描（只读）
+const char* ND_CleanRun(const char* names, int rec);// 执行清理
+const char* ND_Hardware(int compact);               // 硬件检测
+const char* ND_OptList(void);                       // 151 项优化状态
+const char* ND_OptApply(const char* names, int rst);// 应用 / 还原优化项
+const char* ND_Services(const char* filter);        // 枚举服务
+const char* ND_Startup(void);                       // 枚举启动项
+void        ND_Free(void);                          // 释放返回缓冲区
+```
+
 ---
 
 ## 功能
@@ -64,29 +102,41 @@
 ## 构建
 
 需要 **.NET 10 SDK**（Windows）。
+构建原生 DLL 还需要 **Visual Studio 的 C++ 生成工具 + Windows SDK**（NativeAOT 依赖 MSVC 链接器）。
 
 ```powershell
 git clone https://github.com/xiyanruoxue/NetDoctor.git
 cd NetDoctor
 
-# 直接构建运行
+# 只构建主程序
 dotnet build src/NetDoctor.csproj -c Release
 .\src\bin\Release\net10.0-windows\夕颜若雪网络工具.exe
 
-# 发布单文件自包含 exe
-.\publish.ps1
-```
+# 构建 x86 原生 DLL（给易语言用）
+dotnet publish native/NetDoctorNative.csproj -c Release -r win-x86
+.\native\bin\Release\net10.0\win-x86\publish\NetDoctorNative.dll
 
-`publish.ps1` 会把单文件 exe 输出到 `publish/`。
+# 一键发布：主程序 + 原生 DLL + 跑原生调用测试
+.\publish.ps1
+
+# 只想发主程序（没装 MSVC 时）
+.\publish.ps1 -SkipNative
+```
 
 ### 自测
 
 ```powershell
+# 1) 核心引擎自测（24 组 44 项断言）
 dotnet build selftest/SelfTest.csproj -c Release
 .\selftest\bin\Release\net10.0-windows\NetDoctorSelfTest.exe
+
+# 2) 原生 DLL 调用测试（x86 宿主，模拟易语言调用，32 项断言）
+dotnet publish native-test/NetDoctorNativeTest.csproj -c Release -r win-x86
+.\native-test\bin\Release\net10.0\win-x86\publish\NetDoctorNativeTest.exe
 ```
 
-24 组 44 项断言，全部为真机实测（网卡 / 连通性 / DNS / 服务 / 启动项 / Appx / 计划任务 / 硬件 / 跑分 / 清理测量），退出码非 0 表示有失败项。
+两者都跑真机实测（网卡 / 连通性 / DNS / 服务 / 启动项 / Appx / 计划任务 / 硬件 / 跑分 / 清理测量），
+退出码非 0 表示有失败项。原生测试还会验证传 NULL、传非法 JSON 等边界情况不会崩溃宿主。
 
 ---
 
@@ -94,9 +144,9 @@ dotnet build selftest/SelfTest.csproj -c Release
 
 ```
 NetDoctor/
-├── src/
+├── src/                         主程序（WinForms，8 个页面）
 │   ├── Program.cs  Theme.cs  app.manifest
-│   ├── Core/            # 引擎层
+│   ├── Core/                    ★ 引擎层，主程序与原生 DLL 共用
 │   │   ├── NetworkDiag.cs        网络诊断
 │   │   ├── NetworkRepair.cs      修复 + 快照
 │   │   ├── NetworkOptimizer.cs   DNS 测速 / TCP 调优
@@ -105,14 +155,23 @@ NetDoctor/
 │   │   ├── SystemItems.cs        Appx / 服务 / 启动项 / 计划任务
 │   │   ├── HardwareInfo.cs       硬件信息
 │   │   ├── ToolLauncher.cs       工具启动器 + 跑分
+│   │   ├── Interop.cs            P/Invoke 声明
 │   │   ├── Cmd.cs                命令执行 + 日志 + 内嵌脚本释放
 │   │   └── nettop.ps1  sysitems.ps1
-│   ├── UI/              # 界面层（8 个页面 + 自绘控件）
-│   └── Data/Optimizations.xml    优化定义（自建格式，可编辑）
-├── selftest/            自测工程（复用 src 源文件）
-├── docs/使用说明.md      完整中文文档
-├── publish.ps1          一键发布
-└── .github/workflows/   CI：构建 + 自测 + Release
+│   ├── UI/                      界面层（页面 + 自绘控件）
+│   └── Data/Optimizations.xml   优化定义（自建格式，可编辑）
+├── native/                      ★ 原生 DLL 工程（NativeAOT, x86）
+│   ├── NetDoctorNative.csproj
+│   ├── ExportApi.cs             导出层（__stdcall + JSON 缓冲）
+│   └── NativeApi.cs             接口实现（复用 src/Core）
+├── native-test/                 原生 DLL 的 x86 调用测试宿主
+├── selftest/                    核心引擎自测工程
+├── docs/
+│   ├── 使用说明.md               完整中文手册
+│   ├── 原生接口.md               ★ DLL 接口设计文档
+│   └── 易语言接入.md             ★ 易语言调用示例与避坑清单
+├── publish.ps1                  一键发布
+└── .github/workflows/           CI：构建 + 自测 + Release
 ```
 
 ---

@@ -240,7 +240,13 @@ internal sealed class RepairView : Panel
             "完成后需要重启电脑。期间网络会中断数次。\n\n确定继续吗？",
             "深度修复", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
         if (ans != DialogResult.Yes) { Log.Info("用户取消了深度修复"); return; }
-        await Guard(NetworkRepair.DeepFix);
+
+        // 重启询问交给界面层（Core 不依赖 WinForms，原生 DLL 走同一份实现但不弹窗）
+        await Guard(() => NetworkRepair.DeepFix(
+            confirmReboot: () => MessageBox.Show(
+                "深度修复已完成。\n\nWinsock 和 TCP/IP 协议栈的重置需要重启电脑才能完全生效。\n是否现在重启？",
+                "夕颜若雪网络工具", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes,
+            notify: msg => MessageBox.Show(msg, "提示")));
     }
 
     private async void RunSelected()

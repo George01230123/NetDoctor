@@ -41,9 +41,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 自测工程与本工程使用同一批源文件，不能同时被编译进来 -->
+    <!-- 自测工程与原生 DLL 工程各自有入口/导出文件，不能一起编译进来 -->
     <Compile Remove="selftest\**" />
     <None Remove="selftest\**" />
+    <Compile Remove="native\**" />
+    <None Remove="native\**" />
   </ItemGroup>
 
   <ItemGroup>

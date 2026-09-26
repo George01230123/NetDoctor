@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    夕颜若雪网络工具 · 原生 DLL（x86）
+    ============================================
+    给 32 位易语言宿主用 LoadLibrary 调用的原生动态库。
+
+    · NativeAOT 编译为真正的原生 x86 DLL，宿主无需安装 .NET 运行时
+    · 导出函数为 __stdcall，返回 UTF-8 JSON，内存由 ND_Free 释放
+    · 与主程序共用 src/Core 下的同一份源码，不复制代码
+    · 只编译 Core 与 NativeApi，不引用任何界面代码
+  -->
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>NetDoctorNative</AssemblyName>
+    <RootNamespace>NetDoctor</RootNamespace>
+
+    <!-- NativeAOT：产出真正的原生 DLL -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <StackTraceSupport>false</StackTraceSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <DebugType>none</DebugType>
+    <Optimize>true</Optimize>
+    <IlcGenerateCompleteTypeMetadata>false</IlcGenerateCompleteTypeMetadata>
+    <IlcDisableReflection>true</IlcDisableReflection>
+
+    <Version>1.3.0</Version>
+    <FileVersion>1.3.0.0</FileVersion>
+    <AssemblyVersion>1.3.0.0</AssemblyVersion>
+    <Product>夕颜若雪网络工具 原生接口</Product>
+    <Company>xiyanruoxue</Company>
+    <Copyright>网络诊断 / 断网修复 / DNS 优化 / 垃圾清理 / 硬件检测</Copyright>
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <NoWarn>CA1416;IL2026;IL3050;IL3053</NoWarn>
+
+    <!-- 只编译本工程与 Core 的源文件 -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="NativeApi.cs" />
+    <Compile Include="Exports.cs" />
+    <Compile Include="..\src\Core\*.cs" LinkBase="Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内嵌资源：优化定义 + 运行时脚本 -->
+    <EmbeddedResource Include="..\src\Data\Optimizations.xml" LogicalName="NetDoctor.Data.Optimizations.xml" />
+    <EmbeddedResource Include="..\src\Core\nettop.ps1" LogicalName="NetDoctor.Data.nettop.ps1" />
+    <EmbeddedResource Include="..\src\Core\sysitems.ps1" LogicalName="NetDoctor.Data.sysitems.ps1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

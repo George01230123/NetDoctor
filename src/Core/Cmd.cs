@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text;
 
+using NetDoctor.Core;
+
 namespace NetDoctor;
 
 internal sealed class CmdResult
@@ -96,20 +98,72 @@ internal static class Cmd
 
 /// <summary>
 /// 随程序发布的内嵌脚本。
-/// 单文件发布下不能依赖"随包内容文件"，否则启用 IncludeAllContentForSelfExtract 后
-/// AppContext.BaseDirectory 会指向临时解包目录，日志和快照就会跑丢；
-/// 所以把脚本编译进 exe，首次运行时释放到 exe 同级的 .runtime 目录。
+///
+/// 为什么这样做：单文件发布时如果依赖"随包内容文件"，启用 IncludeAllContentForSelfExtract 后
+/// AppContext.BaseDirectory 会指向临时解包目录，日志和快照就会跑丢；所以脚本编译进程序集，
+/// 首次运行时释放到磁盘。
+///
+/// 释放位置的判定顺序：
+///   1. 宿主显式指定的目录（ND_SetDataDir）—— 原生 DLL 场景下由易语言调用方决定
+///   2. 宿主进程 exe 所在目录（NativeAOT / 被别的程序托管时，AppContext.BaseDirectory 不可靠）
+///   3. AppContext.BaseDirectory（普通托管 exe）
+/// 最终都再拼一个子目录，避免把宿主目录搞乱。
 /// </summary>
 internal static class EmbeddedScripts
 {
+    private static string _override;
     private static string _dir;
+
+    /// <summary>宿主显式指定数据目录（原生 DLL 用）。传空则恢复自动判定。</summary>
+    public static void SetDataDir(string dir)
+    {
+        _override = string.IsNullOrWhiteSpace(dir) ? null : dir;
+        _dir = null;
+    }
+
+    private static string HostExeDir()
+    {
+        // NativeAOT 下 GetModuleHandle(null) 得到的是宿主进程的主模块
+        try
+        {
+            var sb = new StringBuilder(1024);
+            IntPtr h = NativeMethods.GetModuleHandleW(null);
+            if (h != IntPtr.Zero &&
+                NativeMethods.GetModuleFileNameW(h, sb, sb.Capacity) > 0)
+            {
+                var exe = sb.ToString();
+                if (!string.IsNullOrEmpty(exe))
+                {
+                    var d = Path.GetDirectoryName(exe);
+                    if (!string.IsNullOrEmpty(d)) return d;
+                }
+            }
+        }
+        catch { }
+
+        try
+        {
+            var p = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(p))
+            {
+                var d = Path.GetDirectoryName(p);
+                if (!string.IsNullOrEmpty(d)) return d;
+            }
+        }
+        catch { }
+        return null;
+    }
 
     public static string Dir
     {
         get
         {
             if (_dir != null) return _dir;
-            _dir = Path.Combine(AppContext.BaseDirectory, ".runtime");
+
+            string baseDir = _override ?? HostExeDir() ?? AppContext.BaseDirectory;
+            if (string.IsNullOrEmpty(baseDir)) baseDir = ".";
+
+            _dir = Path.Combine(baseDir, _override != null ? ".netdoctor" : ".runtime");
             return _dir;
         }
     }

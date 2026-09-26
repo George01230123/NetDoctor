@@ -287,7 +287,14 @@ internal static class NetworkRepair
         if (_needReboot) Log.Warn("有项目需要重启电脑才能完全生效");
     }
 
-    public static async Task DeepFix()
+    /// <summary>
+    /// 深度修复。界面层与原生 DLL 共用这一份实现，
+    /// 因此这里不能直接弹窗 —— 交互通过 <paramref name="confirmReboot"/> 回调注入：
+    /// 传 null 表示无界面（原生 DLL 场景），只做修复、不询问重启。
+    /// </summary>
+    /// <param name="confirmReboot">返回 true 表示调用方同意立即重启；null 表示不询问也不重启</param>
+    /// <param name="notify">用于提示"已安排重启"等信息的回调，可为 null</param>
+    public static async Task DeepFix(Func<bool> confirmReboot = null, Action<string> notify = null)
     {
         Log.Info("════════ 深度修复 开始（会重置协议栈）════════");
         await Backup.Snapshot("深度修复");
@@ -302,38 +309,11 @@ internal static class NetworkRepair
         Log.Info("════════ 深度修复 结束 ════════");
         Log.Warn("深度修复已完成，请重启电脑使全部改动生效");
 
-        var ans = MessageBox.Show(
-            "深度修复已完成。\n\nWinsock 和 TCP/IP 协议栈的重置需要重启电脑才能完全生效。\n是否现在重启？",
-            "夕颜若雪网络工具", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-        if (ans == DialogResult.Yes)
-        {
-            Log.Warn("用户选择重启电脑");
-            Cmd.Run("shutdown", "/r /t 15 /c \"网络工具：深度修复完成，15 秒后重启\"", 10000);
-            MessageBox.Show("已在 15 秒后重启。\n\n取消请立即运行：shutdown /a", "提示");
-        }
+        if (confirmReboot == null) return;          // 无界面：不自动重启
+        if (!confirmReboot()) { Log.Info("用户暂不重启"); return; }
+
+        Log.Warn("用户选择重启电脑");
+        Cmd.Run("shutdown", "/r /t 15 /c \"网络工具：深度修复完成，15 秒后重启\"", 10000);
+        notify?.Invoke("已在 15 秒后重启。\n\n取消请立即运行：shutdown /a");
     }
-}
-
-internal static class NativeMethods
-{
-    [System.Runtime.InteropServices.DllImport("wininet.dll",
-        CharSet = System.Runtime.InteropServices.CharSet.Ansi, SetLastError = true)]
-    public static extern IntPtr InternetOpenA(string agent, int accessType, string proxy, string proxyBypass, int flags);
-
-    [System.Runtime.InteropServices.DllImport("wininet.dll",
-        CharSet = System.Runtime.InteropServices.CharSet.Ansi, SetLastError = true)]
-    public static extern bool InternetSetOptionA(IntPtr hInternet, int option, IntPtr buffer, int length);
-
-    [System.Runtime.InteropServices.DllImport("wininet.dll", SetLastError = true)]
-    public static extern bool InternetCloseHandle(IntPtr h);
-
-    public static readonly IntPtr HWND_BROADCAST = new IntPtr(0xFFFF);
-
-    [System.Runtime.InteropServices.DllImport("shell32.dll")]
-    public static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
-
-    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto,
-        SetLastError = true)]
-    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, int msg, IntPtr wParam, string lParam,
-        int flags, int timeout, out IntPtr result);
 }

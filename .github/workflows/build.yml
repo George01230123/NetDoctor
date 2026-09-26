@@ -52,40 +52,68 @@ jobs:
           -p:DebugType=none
           -o publish
 
+      # windows-latest 自带 VS 2022 的 C++ 生成工具与 Windows SDK，可直接编译 NativeAOT
+      - name: 构建 x86 原生 DLL（给易语言调用）
+        run: dotnet publish native/NetDoctorNative.csproj -c Release -r win-x86 -o publish
+
+      - name: 原生 DLL 调用测试（x86 宿主模拟易语言调用）
+        run: |
+          dotnet publish native-test/NetDoctorNativeTest.csproj -c Release -r win-x86
+          Copy-Item publish/NetDoctorNative.dll native-test/bin/Release/net10.0/win-x86/publish/ -Force
+          native-test/bin/Release/net10.0/win-x86/publish/NetDoctorNativeTest.exe
+        shell: pwsh
+
       - name: 收集产物信息
         id: info
         shell: pwsh
         run: |
           $exe = Get-Item 'publish/夕颜若雪网络工具.exe'
+          $dll = Get-Item 'publish/NetDoctorNative.dll'
           $mb  = [math]::Round($exe.Length / 1MB, 1)
+          $dm  = [math]::Round($dll.Length / 1MB, 1)
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
-          "size=$mb"      >> $env:GITHUB_OUTPUT
-          "sha=$sha"      >> $env:GITHUB_OUTPUT
-          Write-Host "产物：$mb MB  SHA256=$sha"
+          $dsha = (Get-FileHash $dll.FullName -Algorithm SHA256).Hash
+          "size=$mb"       >> $env:GITHUB_OUTPUT
+          "dllsize=$dm"    >> $env:GITHUB_OUTPUT
+          "sha=$sha"       >> $env:GITHUB_OUTPUT
+          "dllsha=$dsha"   >> $env:GITHUB_OUTPUT
+          Write-Host "主程序：$mb MB  SHA256=$sha"
+          Write-Host "原生DLL：$dm MB  SHA256=$dsha"
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: NetDoctor-win-x64
-          path: publish/夕颜若雪网络工具.exe
+          path: |
+            publish/夕颜若雪网络工具.exe
+            publish/NetDoctorNative.dll
           if-no-files-found: error
 
       - name: 附加到 Release（仅打 tag 时）
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: publish/夕颜若雪网络工具.exe
+          files: |
+            publish/夕颜若雪网络工具.exe
+            publish/NetDoctorNative.dll
           name: ${{ github.ref_name }}
           draft: false
           prerelease: false
           body: |
             ## 夕颜若雪网络工具 ${{ github.ref_name }}
 
-            单文件自包含，**下载后双击即可运行**，无需安装 .NET 运行时。
-            首次运行会请求管理员权限（修复、优化、服务、启动项、清理都需要）。
+            两个产物，按需下载：
 
-            - 大小：${{ steps.info.outputs.size }} MB
+            ### 1. 独立程序 `夕颜若雪网络工具.exe`（${{ steps.info.outputs.size }} MB）
+            单文件自包含，**双击即可运行**，无需安装 .NET 运行时。
+            首次运行会请求管理员权限（修复、优化、服务、启动项、清理都需要）。
             - SHA256：`${{ steps.info.outputs.sha }}`
+
+            ### 2. 原生接口库 `NetDoctorNative.dll`（${{ steps.info.outputs.dllsize }} MB，x86）
+            给 **32 位易语言**程序 `LoadLibrary` 调用的原生 DLL，NativeAOT 编译，**宿主无需安装 .NET**。
+            15 个 `__stdcall` 导出函数，统一返回 UTF-8 JSON。
+            - SHA256：`${{ steps.info.outputs.dllsha }}`
+            - 用法见 `docs/原生接口.md` 与 `docs/易语言接入.md`
 
             ### 功能
             网络检测 / 断网修复 / 网络优化 · Windows 优化（151 项）
