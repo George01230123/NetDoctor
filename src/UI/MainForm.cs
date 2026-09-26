@@ -150,7 +150,7 @@ internal sealed class MainForm : Form
 
         var sideBottom = new Label
         {
-            Text = "v1.3.0\n网络 · Windows 优化\n系统工具 · 硬件检测",
+            Text = "v1.4.0\n网络 · Windows 优化\n系统工具 · 硬件检测\n原生接口 DLL",
             Font = Theme.F(8f),
             ForeColor = Theme.Idle,
             Dock = DockStyle.Bottom,
