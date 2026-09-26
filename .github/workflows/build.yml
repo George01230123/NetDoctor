@@ -56,11 +56,15 @@ jobs:
       - name: 构建 x86 原生 DLL（给易语言调用）
         run: dotnet publish native/NetDoctorNative.csproj -c Release -r win-x86 -o publish
 
+      # 用 --ci 模式：只判定「契约」类断言（DLL 能加载、导出齐全、
+      # JSON 合法、错误处理不崩溃宿主、内存管理正常）。
+      # runner 上没有真机网络与硬件，涉及网卡/DNS/显卡/磁盘/第三方服务的项
+      # 会标注为 [env] 而不计入失败，避免误报。
       - name: 原生 DLL 调用测试（x86 宿主模拟易语言调用）
         run: |
           dotnet publish native-test/NetDoctorNativeTest.csproj -c Release -r win-x86
           Copy-Item publish/NetDoctorNative.dll native-test/bin/Release/net10.0/win-x86/publish/ -Force
-          native-test/bin/Release/net10.0/win-x86/publish/NetDoctorNativeTest.exe
+          native-test/bin/Release/net10.0/win-x86/publish/NetDoctorNativeTest.exe --ci
         shell: pwsh
 
       - name: 收集产物信息
