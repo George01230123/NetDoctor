@@ -1,0 +1,68 @@
+name: 功能建议 / Feature request
+description: 想要新增的功能、改进建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过已有 Issue，没有重复
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关功能领域
+      multiple: true
+      options:
+        - 网络检测 / 诊断
+        - 断网修复
+        - 网络优化（DNS / TCP）
+        - Windows 优化条目
+        - 垃圾清理
+        - 应用管理（Appx）
+        - 系统服务 / 启动项
+        - 硬件检测
+        - 工具启动器
+        - 性能测试 / 跑分
+        - 屏幕测试
+        - 界面 / 交互
+        - 打包 / 构建 / CI
+        - 其它
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 先说场景和痛点，再说方案。比如"我经常要判断一台机器是不是被限速了，现在得自己算"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 你设想的方案
+      description: 具体到界面放哪、点了之后发生什么最好
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternative
+    attributes:
+      label: 有没有考虑过其它替代方案
+      description: 例如别的工具是怎么做的、为什么不够用
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: 截图、参考链接、相关工具的界面示例等
+      render: text
+    validations:
+      required: false

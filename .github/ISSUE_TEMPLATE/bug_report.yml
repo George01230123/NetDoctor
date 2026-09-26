@@ -1,0 +1,105 @@
+name: 问题反馈 / Bug report
+description: 程序报错、功能异常、检测结果不对
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请尽量把信息填完整，尤其是**日志**和**系统版本**，
+        否则很难定位问题。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过已有 Issue，没有重复
+          required: true
+        - label: 我使用的是最新版本（见 README 或 Release 页）
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 程序版本
+      description: 程序标题栏左侧底部显示的版本号，或 Release 页的 tag
+      placeholder: "例如 v1.3.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows Server 2019/2022
+        - 其它（请在补充说明里写）
+    validations:
+      required: true
+
+  - type: input
+    id: osversion
+    attributes:
+      label: 系统版本号
+      description: 按 Win+R 输入 winver 查看，或程序「硬件检测」页导出报告里的「操作系统」一行
+      placeholder: "例如 10.0.26200"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: page
+    attributes:
+      label: 出问题的功能页
+      multiple: true
+      options:
+        - 概览
+        - 网络检测
+        - 断网修复
+        - 网络优化
+        - Windows优化
+        - 系统工具（清理/应用/服务/启动项/激活）
+        - 硬件检测（硬件信息/工具启动器/性能测试/屏幕测试）
+        - 运行日志
+        - 启动就失败
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象描述
+      description: 你点了什么、期望发生什么、实际发生了什么
+      placeholder: |
+        1. 打开「网络检测」页
+        2. 点「开始全面检测」
+        3. 期望看到 5 项连通性结果，实际第 3 项显示"全部超时"
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: 运行日志
+      description: |
+        把 `logs\NetDoctor_YYYYMMDD.log` 里相关部分贴进来（点程序里「打开日志文件」按钮）。
+        **请先自行检查有没有隐私信息（用户名、内网 IP、MAC 等），必要时打码。**
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充信息
+      description: |
+        有助排查的内容，例如：
+        - 报错弹窗截图
+        - 是否装了杀软（火绒/360/Defender）以及是否拦截过
+        - 是否以管理员身份运行
+        - `backup\backup.ini` 里的相关片段（如果是优化/修复类问题）
+      render: text
+    validations:
+      required: false

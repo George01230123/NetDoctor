@@ -1,13 +1,22 @@
 # 夕颜若雪网络工具（NetDoctor）
 
+[中文](README.md) | [English](README_EN.md)
+
 一个面向 Windows 10 / 11 的**一体化系统工具**：网络诊断修复、Windows 优化、垃圾清理、应用/服务/启动项管理、硬件检测与跑分。
 
 .NET 10 + WinForms 编写，**单文件自包含发布**，目标机器无需安装任何运行时。界面为自绘暗色主题，无边框窗口。
 
 ```
-┌─ 概览 ─┬─ 网络检测 ─┬─ 断网修复 ─┬─ 网络优化 ─┐
-├─ Windows优化 ─┬─ 系统工具 ─┬─ 硬件检测 ─┬─ 运行日志 ─┤
+概览 · 网络检测 · 断网修复 · 网络优化 · Windows优化 · 系统工具 · 硬件检测 · 运行日志
 ```
+
+---
+
+## 下载
+
+到 [Releases](../../releases) 页下载 `夕颜若雪网络工具.exe`（约 47 MB），**双击即可运行**，无需安装 .NET。
+
+首次运行会请求管理员权限（修复、优化、服务、启动项、清理都依赖管理员权限）。
 
 ---
 
@@ -46,7 +55,7 @@
 | 子页 | 说明 |
 |---|---|
 | **硬件信息** | 全部来自 **WMI/CIM + 注册表**，本机采集零上传：系统/整机/主板/BIOS/UUID、CPU（核心线程缓存负载）、内存（DDR 代际自动识别 + **单双通道判断**）、显卡（**显存**）、硬盘（**SMART 健康度/温度/通电小时/磨损度**）、分区、显示器（**EDID 面板型号/生产年月/物理尺寸**）、网卡、声卡、电池健康度、温度传感器。支持导出报告与紧凑格式。 |
-| **工具启动器** | 扫描本机图吧工具箱的 `tools` 目录，按分类列出其中的原版工具并直接启动，**不复制不修改**任何第三方程序。 |
+| **工具启动器** | 扫描本机已安装的图吧工具箱 `tools` 目录，按分类列出其中的原版工具并直接启动，**不复制不修改**任何第三方程序。 |
 | **性能测试** | CPU 跑分（SHA256 单/多线程吞吐 + 浮点，给出多线程加速比）；磁盘顺序读写测速（临时文件自动删除）。 |
 | **屏幕测试** | 全屏纯色查坏点/漏光、灰阶渐变查色带、三级网格查几何失真与摩尔纹、多字号文字清晰度测试。ESC 退出。 |
 
@@ -57,7 +66,7 @@
 需要 **.NET 10 SDK**（Windows）。
 
 ```powershell
-git clone https://github.com/<你的用户名>/NetDoctor.git
+git clone https://github.com/xiyanruoxue/NetDoctor.git
 cd NetDoctor
 
 # 直接构建运行
@@ -68,7 +77,7 @@ dotnet build src/NetDoctor.csproj -c Release
 .\publish.ps1
 ```
 
-`publish.ps1` 会输出单文件 exe 到 `publish/`，并可选复制到指定目录。
+`publish.ps1` 会把单文件 exe 输出到 `publish/`。
 
 ### 自测
 
@@ -77,22 +86,48 @@ dotnet build selftest/SelfTest.csproj -c Release
 .\selftest\bin\Release\net10.0-windows\NetDoctorSelfTest.exe
 ```
 
-24 组 44 项断言，全部为真机实测（网卡/连通性/DNS/服务/启动项/Appx/计划任务/硬件/跑分/清理测量），退出码非 0 表示有失败项。
+24 组 44 项断言，全部为真机实测（网卡 / 连通性 / DNS / 服务 / 启动项 / Appx / 计划任务 / 硬件 / 跑分 / 清理测量），退出码非 0 表示有失败项。
 
 ---
 
-## 需要管理员权限
+## 项目结构
 
-程序清单声明 `requireAdministrator`：修复、优化、服务、启动项、清理都依赖管理员权限。
-**所有写操作都会在 `backup/` 下留快照**（代理设置、TCP 参数、每块网卡配置、默认路由、hosts，以及每个优化项的注册表原值）。
+```
+NetDoctor/
+├── src/
+│   ├── Program.cs  Theme.cs  app.manifest
+│   ├── Core/            # 引擎层
+│   │   ├── NetworkDiag.cs        网络诊断
+│   │   ├── NetworkRepair.cs      修复 + 快照
+│   │   ├── NetworkOptimizer.cs   DNS 测速 / TCP 调优
+│   │   ├── WindowsOptimizer.cs   151 项优化引擎
+│   │   ├── JunkCleaner.cs        垃圾清理
+│   │   ├── SystemItems.cs        Appx / 服务 / 启动项 / 计划任务
+│   │   ├── HardwareInfo.cs       硬件信息
+│   │   ├── ToolLauncher.cs       工具启动器 + 跑分
+│   │   ├── Cmd.cs                命令执行 + 日志 + 内嵌脚本释放
+│   │   └── nettop.ps1  sysitems.ps1
+│   ├── UI/              # 界面层（8 个页面 + 自绘控件）
+│   └── Data/Optimizations.xml    优化定义（自建格式，可编辑）
+├── selftest/            自测工程（复用 src 源文件）
+├── docs/使用说明.md      完整中文文档
+├── publish.ps1          一键发布
+└── .github/workflows/   CI：构建 + 自测 + Release
+```
 
-运行时会在 exe 同级生成：
+---
+
+## 运行时生成的目录
+
+程序会在 exe 同级创建：
 
 ```
 logs/        运行日志（每天一个文件）
 backup/      改动前快照，可对照回滚
 .runtime/    内嵌 PowerShell 脚本的释放目录（首次运行自动生成）
 ```
+
+**所有写操作**都会在 `backup/` 下留快照：代理设置、TCP 参数、每块网卡配置、默认路由、hosts，以及每个优化项的注册表原值。
 
 ---
 
