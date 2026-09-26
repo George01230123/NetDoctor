@@ -57,6 +57,12 @@ $exe = Join-Path $outDir '夕颜若雪网络工具.exe'
 if (-not (Test-Path $exe)) { throw "未生成 exe：$exe" }
 Good ("夕颜若雪网络工具.exe  {0} MB" -f [math]::Round((Get-Item $exe).Length / 1MB, 1))
 
+# 再复制一份 ASCII 文件名：GitHub Release 对非 ASCII 附件名支持有问题
+# （中文名上传后会变成 default.exe），发版时用这一份
+$exeAscii = Join-Path $outDir 'NetDoctor-win-x64.exe'
+Copy-Item $exe $exeAscii -Force
+Dim ("NetDoctor-win-x64.exe  {0} MB  （ASCII 名副本，用于 GitHub Release）" -f [math]::Round((Get-Item $exeAscii).Length / 1MB, 1))
+
 $nativeProj = Join-Path $root 'native\NetDoctorNative.csproj'
 if (-not $SkipNative -and -not (Test-Path $nativeProj)) {
     Warn '未找到 native\NetDoctorNative.csproj，自动跳过原生 DLL'

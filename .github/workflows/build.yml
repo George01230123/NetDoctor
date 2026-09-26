@@ -67,11 +67,19 @@ jobs:
           native-test/bin/Release/net10.0/win-x86/publish/NetDoctorNativeTest.exe --ci
         shell: pwsh
 
+      # softprops/action-gh-release 对非 ASCII 文件名支持有问题，
+      # 中文名的 exe 传上去会变成 default.exe，所以先复制一份 ASCII 名再上传。
+      - name: 为 Release 准备 ASCII 文件名
+        shell: pwsh
+        run: |
+          Copy-Item 'publish/夕颜若雪网络工具.exe' 'publish/NetDoctor-win-x64.exe' -Force
+          Get-ChildItem publish | ForEach-Object { Write-Host "  $($_.Name)  $([math]::Round($_.Length/1MB,2)) MB" }
+
       - name: 收集产物信息
         id: info
         shell: pwsh
         run: |
-          $exe = Get-Item 'publish/夕颜若雪网络工具.exe'
+          $exe = Get-Item 'publish/NetDoctor-win-x64.exe'
           $dll = Get-Item 'publish/NetDoctorNative.dll'
           $mb  = [math]::Round($exe.Length / 1MB, 1)
           $dm  = [math]::Round($dll.Length / 1MB, 1)
@@ -89,7 +97,7 @@ jobs:
         with:
           name: NetDoctor-win-x64
           path: |
-            publish/夕颜若雪网络工具.exe
+            publish/NetDoctor-win-x64.exe
             publish/NetDoctorNative.dll
           if-no-files-found: error
 
@@ -98,7 +106,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            publish/夕颜若雪网络工具.exe
+            publish/NetDoctor-win-x64.exe
             publish/NetDoctorNative.dll
           name: ${{ github.ref_name }}
           draft: false
@@ -108,9 +116,10 @@ jobs:
 
             两个产物，按需下载：
 
-            ### 1. 独立程序 `夕颜若雪网络工具.exe`（${{ steps.info.outputs.size }} MB）
+            ### 1. 独立程序 `NetDoctor-win-x64.exe`（${{ steps.info.outputs.size }} MB）
             单文件自包含，**双击即可运行**，无需安装 .NET 运行时。
             首次运行会请求管理员权限（修复、优化、服务、启动项、清理都需要）。
+            程序内显示的名字是「夕颜若雪网络工具」，下载后可以随意改名。
             - SHA256：`${{ steps.info.outputs.sha }}`
 
             ### 2. 原生接口库 `NetDoctorNative.dll`（${{ steps.info.outputs.dllsize }} MB，x86）
