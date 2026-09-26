@@ -131,8 +131,10 @@
   关闭网卡节能；按连接数查看占用网速的进程。
 - **运行日志**：全部操作记录到界面与 `logs\` 目录。
 
+<!--
+  只有打过 tag 的版本才有 Release 页面，目前只发布了 v1.4.0。
+  1.0.0 ~ 1.3.0 是开发过程中的版本记录，未单独发布 Release，
+  因此这里不提供链接，避免出现死链。
+-->
+
 [1.4.0]: https://github.com/George01230123/NetDoctor/releases/tag/v1.4.0
-[1.3.0]: https://github.com/George01230123/NetDoctor/releases/tag/v1.3.0
-[1.2.0]: https://github.com/George01230123/NetDoctor/releases/tag/v1.2.0
-[1.1.0]: https://github.com/George01230123/NetDoctor/releases/tag/v1.1.0
-[1.0.0]: https://github.com/George01230123/NetDoctor/releases/tag/v1.0.0

@@ -1,6 +1,9 @@
 # GitHub 发布步骤
 
-仓库已经在本机初始化好（`main` 分支，含 `v1.3.0` tag），只差推到远程。
+这份文档记录首次上传与后续发布流程。
+
+首次上传已完成，仓库地址：<https://github.com/George01230123/NetDoctor>
+当前已发布的版本：`v1.4.0`
 
 ---
 
@@ -40,7 +43,7 @@ git branch -M main
 git push -u origin main
 
 # 4. 推送 tag —— 这一步会触发 CI 自动构建并发 Release
-git push origin v1.3.0
+git push origin v1.4.0
 ```
 
 > 第一次推可能会弹出浏览器让你登录 GitHub，按提示授权即可。
@@ -54,7 +57,7 @@ git push origin v1.3.0
 
 1. 打开仓库 → **Actions** 标签页
 2. 应该看到一个 `build` 工作流在跑（约 3~6 分钟）
-3. 跑完后去 **Releases** 标签页，应该已经有 `v1.3.0`，附件是 `夕颜若雪网络工具.exe`
+3. 跑完后去 **Releases** 标签页，应该已经有对应版本，附件是 `NetDoctor-win-x64.exe` 与 `NetDoctorNative.dll`
 
 工作流做三件事：
 
@@ -91,7 +94,7 @@ git push origin v1.4.0
 | **About** → Topics | `windows` `system-optimizer` `network-tools` `hardware-info` `dotnet` `winforms` `csharp` |
 | **Settings** → Features → Issues | 打开（Issue 模板已就位） |
 | **Settings** → Features → Discussions | 可选，开了可以把提问和 Bug 分开 |
-| **Releases** → 编辑 v1.3.0 | 勾上 "Set as the latest release" |
+| **Releases** → 编辑最新版本 | 确认已勾选 "Set as the latest release" |
 
 ---
 
