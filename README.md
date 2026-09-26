@@ -121,7 +121,7 @@ void        ND_Free(void);                          // 释放返回缓冲区
 构建原生 DLL 还需要 **Visual Studio 的 C++ 生成工具 + Windows SDK**（NativeAOT 依赖 MSVC 链接器）。
 
 ```powershell
-git clone https://github.com/xiyanruoxue/NetDoctor.git
+git clone https://github.com/George01230123/NetDoctor.git
 cd NetDoctor
 
 # 只构建主程序

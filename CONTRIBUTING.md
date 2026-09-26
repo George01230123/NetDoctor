@@ -14,7 +14,7 @@
   - 建议先建快照再测
 
 ```powershell
-git clone https://github.com/xiyanruoxue/NetDoctor.git
+git clone https://github.com/George01230123/NetDoctor.git
 cd NetDoctor
 dotnet build src/NetDoctor.csproj -c Release
 ```

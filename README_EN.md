@@ -68,7 +68,7 @@ It will request administrator privileges on first run: repair, tuning, service, 
 Requires the **.NET 10 SDK** on Windows.
 
 ```powershell
-git clone https://github.com/xiyanruoxue/NetDoctor.git
+git clone https://github.com/George01230123/NetDoctor.git
 cd NetDoctor
 
 # build and run
