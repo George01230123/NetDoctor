@@ -101,6 +101,26 @@ jobs:
             publish/NetDoctorNative.dll
           if-no-files-found: error
 
+      # 如果同名 Release 已存在（例如重推 tag），先删掉再重建，
+      # 避免旧附件残留（曾经因为文件名问题留下过 default.exe）。
+      # GitHub 删除 tag 的 Release 后需要等索引刷新，所以这里等一下。
+      - name: 清理同名旧 Release（仅打 tag 时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $tag = '${{ github.ref_name }}'
+          gh release view $tag --repo '${{ github.repository }}' 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "发现已存在的 Release $tag，删除后重建"
+            gh release delete $tag --repo '${{ github.repository }}' --yes --cleanup-tag=false
+            Start-Sleep -Seconds 8
+          } else {
+            Write-Host "没有同名 Release，直接创建"
+          }
+
       - name: 附加到 Release（仅打 tag 时）
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
