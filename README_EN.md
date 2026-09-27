@@ -20,6 +20,25 @@ Grab `夕颜若雪网络工具.exe` (~47 MB) from the **Releases** section on th
 
 It will request administrator privileges on first run: repair, tuning, service, startup and cleanup operations all require elevation.
 
+Releases also include **`NetDoctorNative.dll`** — a native x86 interface library for 32-bit hosts
+such as 易语言 (E-language). See the [native interface docs](docs/原生接口.md) (Chinese) and the
+[E-language integration guide](docs/易语言接入.md) (Chinese).
+
+### Native DLL at a glance
+
+- Compiled with **NativeAOT** into a real native x86 DLL — **the host needs no .NET runtime**
+- **17 `__stdcall` exports**, all returning **UTF-8 JSON**, buffer managed by the DLL itself
+- Shares the exact same `src/Core` engine source as the GUI app — no duplicated code
+- Invalid pointers, malformed JSON and extreme parameter values all return `{"ok":false,...}`
+  instead of crashing the host; verified by a dedicated stress-test host
+- Test hosts (no E-language installation required):
+  - `native-test/NetDoctorNativeTest.csproj` — contract + functionality, 32 assertions
+  - `native-test/StressTest.csproj` — invalid pointers, concurrency, buffer reuse, 27 assertions
+
+> ⚠ Two things to know when integrating: (1) the returned pointer refers to a single shared
+> buffer, so copy the text immediately after each call, and (2) `ND_FixDeep` never reboots the
+> machine (it only reports `needReboot: true`) and deliberately leaves the hosts file alone.
+
 ---
 
 ## Features

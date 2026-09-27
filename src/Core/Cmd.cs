@@ -104,10 +104,12 @@ internal static class Cmd
 /// 首次运行时释放到磁盘。
 ///
 /// 释放位置的判定顺序：
-///   1. 宿主显式指定的目录（ND_SetDataDir）—— 原生 DLL 场景下由易语言调用方决定
-///   2. 宿主进程 exe 所在目录（NativeAOT / 被别的程序托管时，AppContext.BaseDirectory 不可靠）
-///   3. AppContext.BaseDirectory（普通托管 exe）
-/// 最终都再拼一个子目录，避免把宿主目录搞乱。
+///   1. **宿主显式指定的目录**（ND_SetDataDir）—— 原样使用，不再往下拼子目录，
+///      因为调用方既然指名了目录，就该完全由他说了算
+///   2. 宿主进程 exe 所在目录 + 子目录（NativeAOT / 被别的程序托管时，
+///      AppContext.BaseDirectory 不可靠，用 GetModuleFileName 拿真实 exe 路径）
+///   3. AppContext.BaseDirectory + 子目录（普通托管 exe）
+/// 2/3 拼子目录是为了不把宿主程序目录搞乱；1 不拼，因为那是调用方自己指定的。
 /// </summary>
 internal static class EmbeddedScripts
 {
@@ -120,6 +122,9 @@ internal static class EmbeddedScripts
         _override = string.IsNullOrWhiteSpace(dir) ? null : dir;
         _dir = null;
     }
+
+    /// <summary>当前是否已被显式指定目录</summary>
+    public static bool HasOverride => _override != null;
 
     private static string HostExeDir()
     {
@@ -160,10 +165,16 @@ internal static class EmbeddedScripts
         {
             if (_dir != null) return _dir;
 
-            string baseDir = _override ?? HostExeDir() ?? AppContext.BaseDirectory;
-            if (string.IsNullOrEmpty(baseDir)) baseDir = ".";
+            if (_override != null)
+            {
+                // 调用方指名了目录，就原样用，不再拼子目录
+                _dir = _override;
+                return _dir;
+            }
 
-            _dir = Path.Combine(baseDir, _override != null ? ".netdoctor" : ".runtime");
+            string baseDir = HostExeDir() ?? AppContext.BaseDirectory;
+            if (string.IsNullOrEmpty(baseDir)) baseDir = ".";
+            _dir = Path.Combine(baseDir, ".runtime");
             return _dir;
         }
     }

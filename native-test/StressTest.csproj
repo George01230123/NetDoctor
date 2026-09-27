@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    原生 DLL 压力 / 边界测试宿主。
+    与 NetDoctorNativeTest 分开：那个测功能契约，这个专测异常路径、
+    并发、缓冲区完整性等正常流程之外的情况。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>NetDoctorStressTest</AssemblyName>
+    <RootNamespace>NetDoctor.StressTest</RootNamespace>
+
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <StackTraceSupport>false</StackTraceSupport>
+    <DebugType>none</DebugType>
+    <NoWarn>CA1416</NoWarn>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Stress.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\native\bin\Release\net10.0\win-x86\publish\NetDoctorNative.dll"
+          Link="NetDoctorNative.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\native\bin\Release\net10.0\win-x86\publish\NetDoctorNative.dll')" />
+  </ItemGroup>
+
+</Project>

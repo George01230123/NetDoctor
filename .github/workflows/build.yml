@@ -67,6 +67,15 @@ jobs:
           native-test/bin/Release/net10.0/win-x86/publish/NetDoctorNativeTest.exe --ci
         shell: pwsh
 
+      # 压力测试：专测异常路径（非法指针、畸形入参、并发、缓冲区复用）。
+      # 这些都是契约级要求，任何环境下都必须成立，所以不加 --ci。
+      - name: 原生 DLL 压力 / 边界测试
+        run: |
+          dotnet publish native-test/StressTest.csproj -c Release -r win-x86
+          Copy-Item publish/NetDoctorNative.dll native-test/bin/Release/net10.0/win-x86/publish/ -Force
+          native-test/bin/Release/net10.0/win-x86/publish/NetDoctorStressTest.exe
+        shell: pwsh
+
       # softprops/action-gh-release 对非 ASCII 文件名支持有问题，
       # 中文名的 exe 传上去会变成 default.exe，所以先复制一份 ASCII 名再上传。
       - name: 为 Release 准备 ASCII 文件名

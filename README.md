@@ -49,7 +49,8 @@ Releases 里同时提供 **`NetDoctorNative.dll`** —— 给 32 位易语言程
 原生 DLL 的要点：
 
 - **NativeAOT 编译**，是真正的原生 x86 DLL，**宿主无需安装 .NET 运行时**
-- 15 个 `__stdcall` 导出函数，统一返回 **UTF-8 JSON**，内存由 DLL 自管
+- 17 个 `__stdcall` 导出函数，统一返回 **UTF-8 JSON**，内存由 DLL 自管
+- 非法指针、畸形 JSON、参数极值均安全返回，**绝不崩溃宿主**（已压测验证）
 - 与主程序**共用同一份 Core 源码**，不复制代码
 - 已用 x86 测试宿主（模拟易语言调用方式）验证 **32 项断言全部通过**
 - 任何异常都转成 `{"ok":false,...}` 返回，**绝不崩溃宿主**
@@ -60,6 +61,8 @@ const char* ND_Version(void);                       // 版本 / 位数 / 是否�
 const char* ND_DiagNetwork(int dnsTest);            // 网络诊断
 const char* ND_FixNetwork(int mode);                // 断网修复（轻量 / 一键）
 const char* ND_FixDeep(void);                       // 深度修复（重置 Winsock/TCP-IP）
+const char* ND_RestoreHosts(void);                  // 还原 hosts（不可逆，需自行确认）
+const char* ND_SetDataDir(const char* dir);         // 指定数据目录
 const char* ND_DnsBenchmark(int applyBest);         // DNS 择优测速
 const char* ND_DnsRestore(void);                    // 恢复自动获取 DNS
 const char* ND_CleanScan(void);                     // 清扫目标占用扫描（只读）

@@ -10,8 +10,6 @@ namespace NetDoctor.Core;
 /// </summary>
 internal static class NativeApi
 {
-    private static readonly object _lock = new();
-    private static int _rpcDepth;
 
     // ===============================================================
     // 工具
@@ -72,10 +70,16 @@ internal static class NativeApi
         public void Dispose() => Log.Line -= _handler;
     }
 
-    /// <summary>把同步调用包起来：异常转错误 JSON、记录日志、保证日志钩子一定被摘掉</summary>
+    /// <summary>
+    /// 把同步调用包起来：异常转错误 JSON、记录日志、保证日志钩子一定被摘掉。
+    ///
+    /// 注意：**入参的解码必须发生在进入这里之前**。
+    /// 因为非法指针导致的访问冲突无法被 catch（.NET 下 AccessViolationException
+    /// 不可捕获），把它包在 try 里也没用，必须在取指针之前就校验掉。
+    /// 见 Exports.ArgSafe()。
+    /// </summary>
     private static string Guard(string func, Func<string> body)
     {
-        lock (_lock) _rpcDepth++;
         try
         {
             using var catcher = new LogCatcher();
@@ -97,7 +101,6 @@ internal static class NativeApi
         }
         finally
         {
-            lock (_lock) _rpcDepth--;
         }
     }
 
@@ -242,21 +245,85 @@ internal static class NativeApi
         });
     }
 
-    /// <summary>深度修复：重置 Winsock/TCP-IP，需要重启，不做自动重启</summary>
+    /// <summary>
+    /// 深度修复：重置 Winsock / TCP-IP 协议栈，需要重启才完全生效。
+    /// 不会自动重启电脑。
+    ///
+    /// ⚠ 刻意**不做** hosts 还原：
+    ///   还原 hosts 会清掉用户自己加的所有条目（屏蔽广告、内网域名映射等），
+    ///   这是不可逆的信息丢失。图形界面里它是可勾选项、且执行前有确认框；
+    ///   而 DLL 调用没有确认环节，所以这里不包含它。
+    ///   需要还原 hosts 请用图形界面，或自行处理。
+    /// </summary>
     public static string FixDeep()
     {
         return Guard("fixdeep", () =>
         {
             Log.Warn("原生调用：深度修复（重置 Winsock / TCP-IP，需重启才完全生效）");
+            Log.Info("说明：深度修复不含 hosts 还原（避免清掉用户自定义条目）");
             Await(Backup.Snapshot("原生DLL：深度修复"));
             Await(NetworkRepair.ResetWinsock());
             Await(NetworkRepair.ResetIpStackFull());
             Await(NetworkRepair.ClearArp());
             Await(NetworkRepair.ClearProxy());
             Await(NetworkRepair.FixServices());
-            Await(NetworkRepair.FixHosts());
             Await(NetworkRepair.RenewDhcp());
-            return Ok("\"needReboot\":true");
+            return Ok("\"needReboot\":true,\"hostsTouched\":false");
+        });
+    }
+
+    /// <summary>单独还原 hosts（危险，需宿主自行确认后调用）</summary>
+    public static string RestoreHosts()
+    {
+        return Guard("restorehosts", () =>
+        {
+            Log.Warn("原生调用：还原 hosts 文件");
+            Await(Backup.Snapshot("原生DLL：还原 hosts"));
+            bool ok = Await(NetworkRepair.FixHosts());
+            return ok ? Ok("\"restored\":true") : Err("failed", "还原 hosts 失败，详见 log");
+        });
+    }
+
+    /// <summary>
+    /// 指定数据目录（释放脚本、日志、快照的落点）。
+    /// </summary>
+    /// <param name="dir">目标目录；null 表示恢复自动判定</param>
+    /// <param name="restoreDefault">true 表示调用方传的是 NULL，即恢复默认</param>
+    public static string SetDataDir(string dir, bool restoreDefault = false)
+    {
+        return Guard("setdatadir", () =>
+        {
+            if (restoreDefault)
+            {
+                EmbeddedScripts.SetDataDir(null);
+                string auto = EmbeddedScripts.Ensure();
+                Log.Info("数据目录已恢复为自动判定：" + auto);
+                return Ok("\"dir\":" + J(auto) + ",\"auto\":true");
+            }
+
+            if (dir == null || dir.Trim().Length == 0)
+                return Err("empty", "数据目录不能为空字符串；如需恢复自动判定请传 NULL");
+
+            try
+            {
+                Directory.CreateDirectory(dir);
+                EmbeddedScripts.SetDataDir(dir);
+                string actual = EmbeddedScripts.Ensure();
+
+                // 真正验证一下能不能写，避免"创建成功但写不进去"
+                string probe = Path.Combine(actual, ".write_test_" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probe, "ok");
+                File.Delete(probe);
+
+                Log.Info("数据目录已切换为：" + actual);
+                return Ok("\"dir\":" + J(actual) + ",\"auto\":false");
+            }
+            catch (Exception ex)
+            {
+                // 切换失败就回滚，避免后续全部功能因为坏目录而不可用
+                try { EmbeddedScripts.SetDataDir(null); } catch { }
+                return Err("io", "无法使用该目录：" + ex.Message);
+            }
         });
     }
 
