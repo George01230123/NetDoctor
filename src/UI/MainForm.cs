@@ -159,17 +159,25 @@ internal sealed class MainForm : Form
         }
         _side.Controls.Add(sideTitle);
 
+        // 高度按字体实际行高算，不写死：
+        // 之前写死 56，而 4 行 8pt 中文需要约 68 像素，
+        // 结果最下面一行「原生接口 DLL」被裁得只剩一点边。
+        //
+        // 底部额外留 22 像素：底部状态栏是横跨整个窗口的，
+        // 会压在侧边栏最下沿上，不留白的话最后一行会被它盖掉。
+        var sideFont = Theme.F(8f);
+        const int sideLines = 4;
         var sideBottom = new Label
         {
             // 版本号从程序集读取，不写死：
             // 写死过一次，发版时改了 csproj 却忘了改这里，界面显示与实际版本不一致。
             Text = $"v{AppVersion()}\n网络 · Windows 优化\n系统工具 · 硬件检测\n原生接口 DLL",
-            Font = Theme.F(8f),
+            Font = sideFont,
             ForeColor = Theme.Idle,
             Dock = DockStyle.Bottom,
-            Height = 56,
+            Height = sideFont.Height * sideLines + 34,   // 行高 × 行数 + 上下留白
             TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(20, 0, 0, 0),
+            Padding = new Padding(20, 8, 0, 22),
         };
         _side.Controls.Add(sideBottom);
 

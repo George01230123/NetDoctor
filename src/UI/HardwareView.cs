@@ -652,19 +652,31 @@ internal sealed class HardwareView : Panel
     {
         EnsureLoaded();
         ScanTools(false);
-        await DetectAsync(false);
+        // 必须等 EnsureLoaded 启动的那次检测，而不是再起一次：
+        // 以前这里直接另调一次 DetectAsync，于是两轮检测并发跑完，
+        // 后完成的那轮把界面刷回「尚未检测」状态，看起来像 autotest 没生效。
+        if (_detectTask != null)
+        {
+            try { await _detectTask; } catch { }
+        }
+        else
+        {
+            await DetectAsync(false);
+        }
         if (tab >= 0 && tab < _tabs.TabPages.Count) _tabs.SelectedIndex = tab;
         ScaleToolCols();
         UpdateToolScroll();
     }
 
     // ===============================================================
+    private Task _detectTask;      // 当前进行中的检测任务，供两处共用
+
     private void EnsureLoaded()
     {
         if (_loaded) return;
         _loaded = true;
         Log.Info("载入硬件检测页…");
         ScanTools(false);
-        _ = DetectAsync(false);
+        _detectTask = DetectAsync(false);
     }
 }
