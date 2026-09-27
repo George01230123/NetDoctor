@@ -64,6 +64,73 @@ internal static unsafe class Stress
 
     private static bool HasOk(string s) => s != null && s.Contains("\"ok\"");
 
+    // ================================================================
+    // 页边界测试夹具
+    //
+    // 背景：宿主传进来的未必是「规规矩矩以 \0 结尾的托管字符串」，
+    //       完全可能是正好卡在页尾、且后面没有 \0 的裸缓冲区。
+    //       这类布局曾让 DLL 越界读进不可访问页，直接把宿主进程干掉
+    //       （AccessViolationException 在 NativeAOT 下无法 catch）。
+    //
+    //       跨页布局必须用「块内相邻页」来构造：VirtualAlloc 按 64KB
+    //       对齐，两次独立分配几乎不可能相邻，但同一个 64KB 块内部的
+    //       页天然相邻。
+    // ================================================================
+
+    private const uint MEM_COMMIT  = 0x1000;
+    private const uint MEM_RESERVE = 0x2000;
+    private const uint PAGE_READWRITE = 0x04;
+    private const uint PAGE_NOACCESS  = 0x01;
+
+    private static readonly List<IntPtr> _pages = new();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr VirtualAlloc(IntPtr addr, IntPtr size, uint type, uint protect);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool VirtualProtect(IntPtr addr, IntPtr size, uint newProtect, out uint oldProtect);
+
+    /// <summary>分配一块 64KB，返回块基址（页内天然相邻）</summary>
+    private static IntPtr NewBlock()
+    {
+        IntPtr a = VirtualAlloc(IntPtr.Zero, (IntPtr)0x10000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (a != IntPtr.Zero) _pages.Add(a);
+        return a;
+    }
+
+    /// <summary>「页尾起始 + 下一页不可访问」：只校验起始页的实现会在这里越界</summary>
+    private static IntPtr EndOfPageThenNoAccess()
+    {
+        IntPtr a = NewBlock();
+        if (a == IntPtr.Zero) return IntPtr.Zero;
+
+        IntPtr next = (IntPtr)(a.ToInt64() + 0x8000 + 4096);
+        uint old;
+        VirtualProtect(next, (IntPtr)4096, PAGE_NOACCESS, out old);   // 次页整页不可访问
+
+        IntPtr p = (IntPtr)(a.ToInt64() + 0x8000 + 4095);            // 本页最后一个字节
+        Marshal.WriteByte(p, (byte)'X');                             // 不放 \0
+        return p;
+    }
+
+    /// <summary>
+    /// 「合法跨页字符串」：内容从一页末尾起、\0 落在下一页。
+    /// 用来验证逐页读取不会把合法输入读丢 ——
+    /// 曾经在这里踩过坑：按页整块读取会把 \0 之后的字节一起带回来，
+    /// 尾部多个 NUL 让 JSON 解析抛异常，合法参数被静默当成空串。
+    /// </summary>
+    private static IntPtr CrossPageJson()
+    {
+        IntPtr a = NewBlock();
+        if (a == IntPtr.Zero) return IntPtr.Zero;
+
+        var bytes = Encoding.UTF8.GetBytes("[\"优化进程数量\"]");
+        IntPtr p = (IntPtr)(a.ToInt64() + 0x8000 + (4096 - (bytes.Length - 2)));   // 末 2 字节跨到下一页
+        Marshal.Copy(bytes, 0, p, bytes.Length);
+        Marshal.WriteByte((IntPtr)(p.ToInt64() + bytes.Length), 0);
+        return p;
+    }
+
     private static void Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -341,6 +408,46 @@ internal static unsafe class Stress
         var missing = expect.Where(e => Native.GetProcAddress(_h, e) == IntPtr.Zero).ToList();
         Chk(missing.Count == 0, $"{expect.Length} 个导出全部可 GetProcAddress",
             missing.Count == 0 ? "" : "缺: " + string.Join(",", missing));
+
+        // ============================================================
+        Section("13. 页边界与跨页参数（宿主不一定给规整的托管字符串）");
+        // 这一组是回归防线：此前的实现只校验「起始地址所在那一页」，
+        // 于是「页尾起始 + 次页不可访问」这种布局会把宿主进程直接搞崩。
+        bool pageOk = false, crossOk = false, crossApplied = false;
+        string crossDetail = "";
+        try
+        {
+            IntPtr endPtr = EndOfPageThenNoAccess();
+            if (endPtr == IntPtr.Zero)
+            {
+                Console.WriteLine("      提示：拿不到 64KB 块，本组跳过");
+            }
+            else
+            {
+                // 关键：调用后本进程还活着，就说明没有越界读
+                pageOk = HasOk(Take(_optApply(endPtr, 0)));
+            }
+
+            IntPtr crossPtr = CrossPageJson();
+            if (crossPtr != IntPtr.Zero)
+            {
+                IntPtr rawExport = Native.GetProcAddress(_h, "NDX_ReadString");
+                if (rawExport != IntPtr.Zero)
+                {
+                    var rf = Marshal.GetDelegateForFunctionPointer<FnStr>(rawExport);
+                    string back = Take(rf(crossPtr));
+                    crossDetail = back ?? "(null)";
+                    crossOk = back != null && back.Contains("\\u0000") == false && back.Contains("优化进程数量");
+                }
+                string applied = Take(_optApply(crossPtr, 0));
+                crossApplied = applied != null && applied.Contains("\"ok\":true");
+            }
+        }
+        catch (Exception ex) { crossDetail = "异常: " + ex.Message; }
+
+        Chk(pageOk, "页尾起始 + 次页不可访问：不崩溃且安全返回（越界读会直接崩进程）");
+        Chk(crossOk, "跨页合法字符串被完整读出、且尾部无多余 NUL", crossDetail.Length > 40 ? crossDetail.Substring(0, 40) : crossDetail);
+        Chk(crossApplied, "跨页合法 JSON 能正常走通业务（不被静默当空串）");
 
         // 收尾
         try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }

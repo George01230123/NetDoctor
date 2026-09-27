@@ -49,11 +49,17 @@ Releases 里同时提供 **`NetDoctorNative.dll`** —— 给 32 位易语言程
 原生 DLL 的要点：
 
 - **NativeAOT 编译**，是真正的原生 x86 DLL，**宿主无需安装 .NET 运行时**
-- 17 个 `__stdcall` 导出函数，统一返回 **UTF-8 JSON**，内存由 DLL 自管
-- 非法指针、畸形 JSON、参数极值均安全返回，**绝不崩溃宿主**（已压测验证）
+- **17 个正式 `__stdcall` 导出**（另加 1 个诊断导出 `NDX_ReadString`），
+  统一返回 **UTF-8 JSON**，内存由 DLL 自管
+- 非法指针、畸形 JSON、参数极值均安全返回，**绝不崩溃宿主**
 - 与主程序**共用同一份 Core 源码**，不复制代码
-- 已用 x86 测试宿主（模拟易语言调用方式）验证 **32 项断言全部通过**
-- 任何异常都转成 `{"ok":false,...}` 返回，**绝不崩溃宿主**
+- 三层测试守着：契约 **32 项**、压力/边界 **30 项**、页边界探测 **10 种布局**，全部通过
+
+> 「绝不崩溃宿主」这句话是被测试逼出来的。入参读取这一小段代码前后修了两轮：
+> 第一轮只校验起始页，于是「字符串从页尾开始」的布局会把宿主进程直接干掉；
+> 第二轮按页整块读取，又把 `\0` 之后的字节一起带回，尾部多余 NUL 让 JSON 解析
+> 抛异常 —— 参数传对了，功能却毫无反应。现在改用内核校验的读取方式，
+> 并有独立进程的页边界探测兜底。
 
 ```c
 const char* ND_Ping(void);                          // 自检，返回 pong
@@ -149,13 +155,28 @@ dotnet publish native/NetDoctorNative.csproj -c Release -r win-x86
 dotnet build selftest/SelfTest.csproj -c Release
 .\selftest\bin\Release\net10.0-windows\NetDoctorSelfTest.exe
 
-# 2) 原生 DLL 调用测试（x86 宿主，模拟易语言调用，32 项断言）
+# 2) 原生 DLL 契约测试（x86 宿主，模拟易语言调用，32 项断言）
 dotnet publish native-test/NetDoctorNativeTest.csproj -c Release -r win-x86
 .\native-test\bin\Release\net10.0\win-x86\publish\NetDoctorNativeTest.exe
+
+# 3) 原生 DLL 压力/边界测试（野指针、页边界、并发、缓冲区完整性，30 项断言）
+dotnet publish native-test/StressTest.csproj -c Release -r win-x86 -o _t\stress
+.\_t\stress\NetDoctorStressTest.exe
+
+# 4) 页边界探测（10 种指针布局，逐个用独立进程跑，任何一次崩溃即失败）
+dotnet publish native-test/CrashProbe.csproj -c Release -r win-x86 -o _t\probe
+#    布局：z=空指针 1=0x1 m=0xFFFFFFFF s=0x1000 h=0xDEADBEEF t=0x40000000
+#          p=页尾无终止符 q=页尾+次页不可访问 y=跨页合法JSON w=跨页只读字符串
+.\_t\probe\CrashProbe.exe q
 ```
 
-两者都跑真机实测（网卡 / 连通性 / DNS / 服务 / 启动项 / Appx / 计划任务 / 硬件 / 跑分 / 清理测量），
-退出码非 0 表示有失败项。原生测试还会验证传 NULL、传非法 JSON 等边界情况不会崩溃宿主。
+四个都跑真机实测（网卡 / 连通性 / DNS / 服务 / 启动项 / Appx / 计划任务 / 硬件 / 跑分 / 清理测量），
+退出码非 0 表示有失败项。
+
+> 后两个是**异常路径**测试。正常流程测试永远测不出「传个野指针就把宿主进程干掉」
+> 这类问题 —— 而 `AccessViolationException` 在 NativeAOT 下无法 `catch`，
+> 一旦发生就是整个工具箱闪退。页边界探测必须用独立进程逐个跑，
+> 否则第一个崩掉之后，后面的布局就再也测不到了。
 
 ---
 

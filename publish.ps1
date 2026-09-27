@@ -5,7 +5,7 @@
 #   .\publish.ps1 -Target 'D:\out'             指定复制目标
 #   .\publish.ps1 -NoDeploy                    只产出到 publish\，不复制到任何目录
 #   .\publish.ps1 -SkipNative                  跳过原生 DLL（没装 MSVC 工具链时用）
-#   .\publish.ps1 -SkipTest                    跳过原生 DLL 调用测试
+#   .\publish.ps1 -SkipTest                    跳过原生 DLL 契约测试 + 压力测试
 #
 # 产出：
 #   publish\夕颜若雪网络工具.exe     单文件自包含主程序（WinForms）
@@ -83,18 +83,64 @@ if (-not $SkipNative) {
     Copy-Item $dll $outDir -Force
     Good ("NetDoctorNative.dll  {0} MB" -f [math]::Round((Get-Item $dll).Length / 1MB, 1))
 
+    # 每个测试宿主用独立输出目录：
+    # 三个测试项目的默认输出路径完全相同，共用会互相覆盖产物
+    # （曾经因此让 CrashProbe.exe 凭空消失，排查了很久）。
+    $tdir = Join-Path $root '_t'
+    if (Test-Path $tdir) { Remove-Item $tdir -Recurse -Force }
+
+    # ---- 契约测试 ----
     $ntestProj = Join-Path $root 'native-test\NetDoctorNativeTest.csproj'
     if (-not $SkipTest -and (Test-Path $ntestProj)) {
-        Dim '正在跑原生 DLL 调用测试（x86 宿主模拟易语言调用）…'
-        dotnet publish $ntestProj -c Release -r win-x86 --nologo | Out-Null
-        $tpub = Join-Path $root 'native-test\bin\Release\net10.0\win-x86\publish'
+        Dim '正在跑原生 DLL 契约测试（x86 宿主模拟易语言调用）…'
+        $tpub = Join-Path $tdir 'contract'
+        dotnet publish $ntestProj -c Release -r win-x86 --nologo -o $tpub | Out-Null
         Copy-Item $dll (Join-Path $tpub 'NetDoctorNative.dll') -Force
         Push-Location $tpub
-        & '.\NetDoctorNativeTest.exe' | Select-Object -Last 4
+        # 不加 Select-Object 之类的管道：那会把输出缓冲到进程结束才显示，
+        # 卡住时完全看不到进度。直接透传，再单独取末尾几行做摘要。
+        & '.\NetDoctorNativeTest.exe' --ci
         $code = $LASTEXITCODE
         Pop-Location
-        if ($code -ne 0) { throw "原生 DLL 测试未通过（退出码 $code）" }
-        Good '原生 DLL 测试通过'
+        if ($code -ne 0) { throw "原生 DLL 契约测试未通过（退出码 $code）" }
+        Good '原生 DLL 契约测试通过'
+    }
+
+    # ---- 页边界 / 跨页参数探测 ----
+    # 「页尾起始 + 次页不可访问」这类布局曾让宿主进程直接消失，
+    # 普通功能测试完全测不出来，所以单独作为一道门槛。
+    $probeProj = Join-Path $root 'native-test\CrashProbe.csproj'
+    if (-not $SkipTest -and (Test-Path $probeProj)) {
+        Dim '正在跑原生 DLL 页边界探测（非法指针 / 页尾 / 跨页）…'
+        $ppub = Join-Path $tdir 'probe'
+        dotnet publish $probeProj -c Release -r win-x86 --nologo -o $ppub | Out-Null
+        Copy-Item $dll (Join-Path $ppub 'NetDoctorNative.dll') -Force
+        Push-Location $ppub
+        $probeBad = @()
+        foreach ($k in 'z', '1', 'm', 's', 'h', 't', 'p', 'q', 'y', 'w') {
+            & '.\CrashProbe.exe' $k *> $null
+            if ($LASTEXITCODE -ne 0) { $probeBad += "$k(exit=$LASTEXITCODE)" }
+        }
+        Pop-Location
+        if ($probeBad.Count -gt 0) {
+            throw "页边界探测失败，以下布局导致宿主异常退出：$($probeBad -join ', ')"
+        }
+        Good '页边界探测通过（10 种布局均未崩溃）'
+    }
+
+    # ---- 压力 / 边界测试 ----
+    $stestProj = Join-Path $root 'native-test\StressTest.csproj'
+    if (-not $SkipTest -and (Test-Path $stestProj)) {
+        Dim '正在跑原生 DLL 压力测试（非法指针 / 并发 / 页边界 / 缓冲区）…'
+        $spub = Join-Path $tdir 'stress'
+        dotnet publish $stestProj -c Release -r win-x86 --nologo -o $spub | Out-Null
+        Copy-Item $dll (Join-Path $spub 'NetDoctorNative.dll') -Force
+        Push-Location $spub
+        & '.\NetDoctorStressTest.exe'
+        $code = $LASTEXITCODE
+        Pop-Location
+        if ($code -ne 0) { throw "原生 DLL 压力测试未通过（退出码 $code）" }
+        Good '原生 DLL 压力测试通过'
     }
 } else {
     Section '3/5 跳过原生 DLL'

@@ -91,6 +91,14 @@ internal static class Exports
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr VirtualQuery(IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, IntPtr dwLength);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess, IntPtr lpBaseAddress, [Out] byte[] lpBuffer, IntPtr nSize, out IntPtr lpNumberOfBytesRead);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
     private const uint MEM_COMMIT   = 0x1000;
     private const uint PAGE_NOACCESS = 0x01;
     private const uint PAGE_GUARD    = 0x100;
@@ -110,6 +118,9 @@ internal static class Exports
             IntPtr n = VirtualQuery(p, out mbi, (IntPtr)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
             if (n == IntPtr.Zero) return false;
             if (mbi.State != MEM_COMMIT) return false;
+            // PAGE_GUARD / PAGE_NOACCESS 必须单独判掉：
+            // 这两者是"已提交但不许访问"，State 仍是 MEM_COMMIT，
+            // 只查 State 会把它们当成可读，读下去照样崩宿主。
             if ((mbi.Protect & PAGE_NOACCESS) != 0) return false;
             if ((mbi.Protect & PAGE_GUARD) != 0) return false;
             return (mbi.Protect & READABLE) != 0;
@@ -118,6 +129,77 @@ internal static class Exports
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// 安全扫出 C 字符串长度。
+    ///
+    /// 为什么不自己逐字节读、也不自己判断页边界：
+    ///   本进程内直接解引用野指针会触发访问冲突，而 .NET / NativeAOT 下
+    ///   AccessViolationException **无法被 catch**，宿主进程会直接消失。
+    ///   自己用 VirtualQuery 判断「下一页可不可读」理论上可行，但校验与读取
+    ///   之间存在窗口，且对 MEM_FREE / PAGE_GUARD / 大页等情形容易漏判 ——
+    ///   实测仍有布局能让宿主崩掉。
+    ///
+    /// 做法：交给内核。ReadProcessMemory 会**逐页校验**整个范围，
+    ///       任何一页不可读就整块失败并返回错误，绝不触发访问冲突。
+    ///       这是结构上不可能崩溃的读取方式。
+    ///
+    /// 循环不变量：每一轮要么推进 total、要么直接 return。
+    ///   （曾经写成「推进 total」放在条件分支里，遇到
+    ///     ReadProcessMemory 成功但只返回 0 字节的情况就死循环，
+    ///     表现为宿主调用后卡住不返回 —— 已按此不变量重写。）
+    ///
+    /// 数据全部来自调用方自身进程（P/Invoke 同进程传参），因此不存在
+    /// 「读别的进程内存」的权限与隐私问题。
+    /// </summary>
+    private static int ScanString(IntPtr p, int max)
+    {
+        if (p == IntPtr.Zero || max <= 0) return 0;
+
+        IntPtr self = GetCurrentProcess();
+        byte[] chunk = null;
+        int total = 0;
+
+        while (total < max)
+        {
+            IntPtr cur = (IntPtr)(p.ToInt64() + total);
+
+            // 一次只读到「当前所在页的页尾」，绝不跨页请求：
+            // 跨页请求会被内核整块拒绝，反而读不到本页末尾的有效数据。
+            int pageLeft = 4096 - (int)(cur.ToInt64() & 0xFFF);
+            int want = Math.Min(pageLeft, max - total);
+            if (want <= 0) return total;                   // 页大小异常，保守收尾
+
+            if (chunk == null || chunk.Length < want) chunk = new byte[want];
+
+            IntPtr got;
+            if (!ReadProcessMemory(self, cur, chunk, (IntPtr)want, out got))
+            {
+                // 本页尾部不可读：缩短到半个剩余量再试；
+                // 缩到 1 字节仍失败，说明当前位置就是边界，到此为止。
+                if (want <= 1) return total;
+                want >>= 1;
+                if (chunk.Length < want) chunk = new byte[want];
+                if (!ReadProcessMemory(self, cur, chunk, (IntPtr)want, out got))
+                    return total;
+            }
+
+            int n = (int)got.ToInt64();
+            if (n <= 0) return total;                      // 兜底，保证必然推进
+
+            int usable = Math.Min(n, want);
+            for (int i = 0; i < usable; i++)
+            {
+                if (chunk[i] == 0) return total + i;
+                total++;
+                if (total >= max) return total;
+            }
+
+            // 读到的比要的少，说明后面就是不可读边界
+            if (n < want) return total;
+        }
+        return total;
     }
 
     /// <summary>
@@ -137,12 +219,22 @@ internal static class Exports
         try
         {
             const int cap = 1 << 20;                       // 参数长度上限 1 MB
-            int len = 0;
-            while (len < cap && Marshal.ReadByte(utf8, len) != 0) len++;
+            // ScanString 用 ReadProcessMemory 读，只会返回「确实读到」的长度，
+            // 因此后面的 Marshal.Copy 一定落在可读范围内，不会再越界。
+            int len = ScanString(utf8, cap);
             if (len == 0) return "";
+            // ScanString 为保证「绝不越界读」，是按页边界整块读取的，
+            // 尾巴上可能多带回若干 NUL（跨页且 \0 落在页尾附近时）。
+            // 这些多余 NUL 会让 JSON 解析直接抛异常 ——
+            // 表现为「字符串读到了却当成空串」，功能静默失效。
+            // 所以这里必须按第一个 \0 截断，不能直接用 len。
             var buf = new byte[len];
             Marshal.Copy(utf8, buf, 0, len);
-            return Encoding.UTF8.GetString(buf);
+
+            int real = 0;
+            while (real < len && buf[real] != 0) real++;
+            if (real == 0) return "";
+            return Encoding.UTF8.GetString(buf, 0, real);
         }
         catch
         {
@@ -292,5 +384,45 @@ internal static class Exports
             }
         }
         catch { }
+    }
+
+    // ===============================================================
+    // 诊断专用导出（临时，验证入参读取链路用，验证完删除）
+    //
+    // 作用：只做「把指针安全读成字符串」这一件事，不做任何业务处理。
+    //       这样就能把「入参读取」和「业务解析」两段分开定位 ——
+    //       业务接口返回 code=empty 时，无法判断是读不到还是解析不到。
+    // ===============================================================
+
+    /// <summary>NDX_ReadString(p) —— 返回 {"raw":"读到的内容","len":长度}，只做安全读取</summary>
+    [UnmanagedCallersOnly(EntryPoint = "NDX_ReadString", CallConvs = new[] { typeof(CallConvStdcall) })]
+    public static IntPtr ReadStringProbe(IntPtr p)
+    {
+        string s = ArgSafe(p);
+        return Return("{\"raw\":" + J(s) + ",\"len\":" + s.Length + "}");
+    }
+
+    private static string J(string s)
+    {
+        if (s == null) return "null";
+        var sb = new System.Text.StringBuilder(s.Length + 2);
+        sb.Append('"');
+        foreach (char c in s)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (c < 0x20) sb.Append("\\u").Append(((int)c).ToString("x4"));
+                    else sb.Append(c);
+                    break;
+            }
+        }
+        sb.Append('"');
+        return sb.ToString();
     }
 }

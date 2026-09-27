@@ -17,6 +17,17 @@ internal sealed class MainForm : Form
     private readonly Dictionary<string, Control> _views = new();
     private readonly bool _admin;
 
+    /// <summary>程序集版本的前三段（1.4.2.0 → "1.4.2"）</summary>
+    private static string AppVersion()
+    {
+        try
+        {
+            var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+            return v == null ? "?" : $"{v.Major}.{v.Minor}.{v.Build}";
+        }
+        catch { return "?"; }
+    }
+
     public DiagView ViewDiag { get; }
     public RepairView ViewRepair { get; }
     public OptimizeView ViewOptimize { get; }
@@ -150,7 +161,9 @@ internal sealed class MainForm : Form
 
         var sideBottom = new Label
         {
-            Text = "v1.4.1\n网络 · Windows 优化\n系统工具 · 硬件检测\n原生接口 DLL",
+            // 版本号从程序集读取，不写死：
+            // 写死过一次，发版时改了 csproj 却忘了改这里，界面显示与实际版本不一致。
+            Text = $"v{AppVersion()}\n网络 · Windows 优化\n系统工具 · 硬件检测\n原生接口 DLL",
             Font = Theme.F(8f),
             ForeColor = Theme.Idle,
             Dock = DockStyle.Bottom,

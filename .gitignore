@@ -22,6 +22,7 @@ backup/
 *.msi
 
 # ---- 测试与覆盖 ----
+_t/
 [Tt]est[Rr]esult*/
 coverage*.json
 coverage*.xml
