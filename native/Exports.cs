@@ -46,9 +46,18 @@ internal static class Exports
                 if (need > _cap)
                 {
                     int newCap = Math.Max(need * 2, 64 * 1024);
-                    if (_buf != IntPtr.Zero) Marshal.FreeHGlobal(_buf);
-                    _buf = Marshal.AllocHGlobal(newCap);
+                    // 先建后拆：必须等新缓冲区分配成功再释放旧的。
+                    // 之前是先 Free 再 Alloc，一旦 Alloc 失败（或抛异常），
+                    // _buf 就悬空指向已释放内存，后续每次调用都会踩它 ——
+                    // 属于 use-after-free，而不是「这次调用失败」这么简单。
+                    IntPtr newBuf;
+                    try { newBuf = Marshal.AllocHGlobal(newCap); }
+                    catch { return IntPtr.Zero; }          // 保持旧缓冲区仍可用
+
+                    IntPtr old = _buf;
+                    _buf = newBuf;
                     _cap = newCap;
+                    if (old != IntPtr.Zero) Marshal.FreeHGlobal(old);
                 }
                 Marshal.Copy(bytes, 0, _buf, bytes.Length);
                 Marshal.WriteByte(_buf, bytes.Length, 0);

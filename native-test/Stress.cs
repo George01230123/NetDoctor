@@ -22,7 +22,7 @@ internal static unsafe class Stress
     private static int _pass, _fail;
     private static FnVoid _version, _optList, _cleanScan, _startup, _free, _ping;
     private static FnInt _hardware, _diag;
-    private static FnStr _services, _setDataDir;
+    private static FnStr _services, _setDataDir, _readString;
     private static FnStrInt _optApply, _cleanRun;
 
     private static void Chk(bool ok, string name, string detail = "")
@@ -152,14 +152,15 @@ internal static unsafe class Stress
         _optApply  = Get<FnStrInt>("ND_OptApply");
         _cleanRun  = Get<FnStrInt>("ND_CleanRun");
         _free      = Get<FnVoid>("ND_Free");
+        _readString= Get<FnStr>("NDX_ReadString");
 
         // ============================================================
-        Section("1. 乱序调用（不先调 ND_Version）");
+        Section("乱序调用（不先调 ND_Version）");
         string a = Take(_optList());
         Chk(HasOk(a), "首个调用直接是 ND_OptList 也能工作", "长度 " + (a?.Length ?? 0));
 
         // ============================================================
-        Section("2. 非法指针入参 —— 绝不能崩溃宿主（曾经会崩）");
+        Section("非法指针入参 —— 绝不能崩溃宿主（曾经会崩）");
         // 这些值里 0xFFFFFFFF / 0x40000000 / 0xDEADBEEF 曾经直接让宿主进程消失
         var ptrs = new (string name, IntPtr p)[]
         {
@@ -197,7 +198,7 @@ internal static unsafe class Stress
         catch (Exception ex) { Chk(false, "野地址测试", ex.Message); }
 
         // ============================================================
-        Section("3. 畸形 JSON 入参");
+        Section("畸形 JSON 入参");
         var cases = new (string name, string json)[]
         {
             ("空字符串", ""), ("纯空格", "   "), ("半个数组", "[\"a\""),
@@ -224,7 +225,7 @@ internal static unsafe class Stress
         Chk(bad == 0, $"{cases.Length} 种畸形 JSON 全部安全返回");
 
         // ============================================================
-        Section("4. 参数极值");
+        Section("参数极值");
         int ef = 0;
         foreach (var v in new[] { 0, 1, -1, int.MaxValue, int.MinValue })
         {
@@ -239,7 +240,7 @@ internal static unsafe class Stress
         Chk(ef == 0, "5 组极值参数（含 INT_MIN/INT_MAX）全部安全");
 
         // ============================================================
-        Section("5. 宿主从不调 ND_Free（缓冲区复用）");
+        Section("宿主从不调 ND_Free（缓冲区复用）");
         bool leakOk = true;
         for (int i = 0; i < 200; i++)
             if (!HasOk(Take(_version()))) { leakOk = false; break; }
@@ -250,7 +251,7 @@ internal static unsafe class Stress
         Chk(small != null && small.Length < 600, "大返回后小返回未被污染", (small?.Length ?? 0) + " 字符");
 
         // ============================================================
-        Section("6. 返回值生命周期说明（验证指针复用行为）");
+        Section("返回值生命周期说明（验证指针复用行为）");
         Take(_optList());
         string first = Take(_cleanScan());
         string h1 = Sha(first);
@@ -262,7 +263,7 @@ internal static unsafe class Stress
         Console.WriteLine("      ⚠ 返回指针在下一次调用后失效，宿主必须先复制成文本再保存");
 
         // ============================================================
-        Section("7. 并发调用（验证不崩溃、不死锁、各自读到自洽数据）");
+        Section("并发调用（验证不崩溃、不死锁、各自读到自洽数据）");
         // 注意：DLL 返回的是内部共享缓冲区的指针，多线程同时调用时
         // 后一次调用会覆盖前一次的内容 —— 这是「共享缓冲区」这一设计的固有性质，
         // 不是 bug（易语言单线程调用界面事件时不会遇到）。
@@ -332,7 +333,7 @@ internal static unsafe class Stress
             raw.Count(x => x.StartsWith("EX:")) == 0 ? "" : "有异常");
 
         // ============================================================
-        Section("8. ND_Free 与调用混用");
+        Section("ND_Free 与调用混用");
         bool mixOk = true;
         var t2 = new Thread(() =>
         {
@@ -346,7 +347,7 @@ internal static unsafe class Stress
         Chk(HasOk(Take(_version())), "混乱调用后仍能正常返回");
 
         // ============================================================
-        Section("9. ND_SetDataDir（新增导出）");
+        Section("ND_SetDataDir（新增导出）");
         string tmp = Path.Combine(Path.GetTempPath(), "nd_stress_datadir");
         try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
         IntPtr dp = Marshal.StringToCoTaskMemUTF8(tmp);
@@ -376,7 +377,7 @@ internal static unsafe class Stress
         Chk(HasOk(Take(_hardware(1))), "目录设置失败后功能仍可用（已回滚）");
 
         // ============================================================
-        Section("10. 长文本与中文编码");
+        Section("长文本与中文编码");
         string cn = Take(_hardware(0));
         Chk(cn != null && (cn.Contains("夕颜") || cn.Contains("处理器") || cn.Contains("内存")),
             "中文以 UTF-8 正确返回");
@@ -384,7 +385,7 @@ internal static unsafe class Stress
             "无 UTF-8/Latin-1 双重编码乱码");
 
         // ============================================================
-        Section("11. 高频调用（缓冲区反复扩缩容）");
+        Section("高频调用（缓冲区反复扩缩容）");
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int n = 0;
         while (sw.ElapsedMilliseconds < 3000)
@@ -397,7 +398,7 @@ internal static unsafe class Stress
         Chk(true, $"3 秒内小/大返回交替 {n} 次无异常", $"约 {n / 3.0:0} 次/秒");
 
         // ============================================================
-        Section("12. 全量导出清点");
+        Section("全量导出清点");
         string[] expect =
         {
             "ND_Ping", "ND_Version", "ND_DiagNetwork", "ND_FixNetwork", "ND_FixDeep",
@@ -410,7 +411,7 @@ internal static unsafe class Stress
             missing.Count == 0 ? "" : "缺: " + string.Join(",", missing));
 
         // ============================================================
-        Section("13. 页边界与跨页参数（宿主不一定给规整的托管字符串）");
+        Section("页边界与跨页参数（宿主不一定给规整的托管字符串）");
         // 这一组是回归防线：此前的实现只校验「起始地址所在那一页」，
         // 于是「页尾起始 + 次页不可访问」这种布局会把宿主进程直接搞崩。
         bool pageOk = false, crossOk = false, crossApplied = false;
@@ -448,6 +449,149 @@ internal static unsafe class Stress
         Chk(pageOk, "页尾起始 + 次页不可访问：不崩溃且安全返回（越界读会直接崩进程）");
         Chk(crossOk, "跨页合法字符串被完整读出、且尾部无多余 NUL", crossDetail.Length > 40 ? crossDetail.Substring(0, 40) : crossDetail);
         Chk(crossApplied, "跨页合法 JSON 能正常走通业务（不被静默当空串）");
+
+        // ============================================================
+        Section("随机模糊测试（机器代替人找盲区）");
+        // 为什么必须有这一段：
+        //   前面第 2、13 组都是「人想到的边界值」，而跨页崩溃当初正是
+        //   人没想到的那一格。模糊测试随机组合「指针位置 × 缓冲区内容 ×
+        //   长度」，用它去撞出意料之外的组合。
+        //
+        // 为什么要固定用同一块缓冲区：
+        //   每次迭代都新分配的话，泄漏会污染第 15 组的内存测量，
+        //   而且会把地址空间打散。固定一块、随机改内容与偏移，等价且干净。
+        {
+            const int BUFSZ = 32768;
+            const int ITER = 3000;
+            IntPtr fbuf = Marshal.AllocHGlobal(BUFSZ);
+            var rnd = new Random(20260927);
+            var fuzz = new byte[BUFSZ];
+
+            int crashGuard = 0, localFail = 0, guardFail = 0, rawFail = 0, cleanFail = 0;
+            int safeCnt = 0, validCnt = 0;
+            var samples = new List<string>();
+
+            for (int it = 0; it < ITER; it++)
+            {
+                // 内容：0 = 全随机字节，1 = 无 \0 的可打印串，2 = 长可打印串后接 \0，3 = 空串
+                int mode = rnd.Next(4);
+                for (int i = 0; i < BUFSZ; i++) fuzz[i] = (byte)rnd.Next(256);
+                if (mode == 1)
+                {
+                    int len = rnd.Next(1, 8192);
+                    for (int i = 0; i < len; i++) fuzz[i] = (byte)(32 + rnd.Next(95));
+                }
+                else if (mode == 2)
+                {
+                    int len = rnd.Next(1, 20000);
+                    for (int i = 0; i < len; i++) fuzz[i] = (byte)(32 + rnd.Next(95));
+                    fuzz[len] = 0;
+                }
+                else if (mode == 3) { fuzz[0] = 0; }
+
+                // 偏移：一半落在页边界附近（最刁钻），其余完全随机
+                int off;
+                if (rnd.Next(2) == 0)
+                    off = rnd.Next(0, BUFSZ / 4096) * 4096 - rnd.Next(0, 8);
+                else
+                    off = rnd.Next(0, BUFSZ);
+                // 让一部分指针直接落到缓冲区之外，制造真正的野地址
+                if (rnd.Next(20) == 0) off += BUFSZ + rnd.Next(1, 8192);
+                if (off < 0) off = 0;
+
+                // 把内容写到该偏移处，保证指针指向的是我们准备的数据
+                int writable = Math.Min(BUFSZ - off, 8192);
+                if (off < BUFSZ && writable > 0)
+                    Marshal.Copy(fuzz, 0, (IntPtr)(fbuf.ToInt64() + off), writable);
+
+                IntPtr ptr = (IntPtr)(fbuf.ToInt64() + off);
+                try
+                {
+                    string rr = Take(_readString(ptr));
+                    if (rr == null || !JsonBalanced(rr)) { localFail++; if (samples.Count < 3) samples.Add("read:" + rr); }
+                    else if (!rr.Contains("\"raw\"")) { rawFail++; if (samples.Count < 3) samples.Add("noRaw:" + rr.Substring(0, Math.Min(60, rr.Length))); }
+                    else if (rr.Contains("\\u0000")) { guardFail++; if (samples.Count < 3) samples.Add("NUL污染:" + rr.Substring(0, Math.Min(60, rr.Length))); }
+                    else if (rr.Contains("\"len\":0")) safeCnt++;
+                    else validCnt++;
+
+                    string a2 = Take(_optApply(ptr, rnd.Next(0, 2)));
+                    if (a2 == null || !JsonBalanced(a2)) cleanFail++;
+
+                    // 每 500 轮插一次其他导出，验证模糊输入不会污染后续正常调用
+                    if (it % 500 == 0)
+                    {
+                        if (!HasOk(Take(_version()))) crashGuard++;
+                        if (!HasOk(Take(_optList()))) crashGuard++;
+                    }
+                }
+                catch (Exception ex) { localFail++; if (samples.Count < 3) samples.Add("EX:" + ex.Message); }
+            }
+
+            Marshal.FreeHGlobal(fbuf);
+            Chk(localFail == 0 && rawFail == 0 && cleanFail == 0 && crashGuard == 0,
+                $"{ITER} 轮随机「指针 × 内容 × 长度」未崩溃、未死锁、返回结构完整",
+                (localFail + rawFail + cleanFail + crashGuard) == 0 ? "" : string.Join(" | ", samples));
+            Chk(guardFail == 0, "模糊输入从不产生尾部 NUL 污染", guardFail == 0 ? "" : $"{guardFail} 次");
+            Console.WriteLine($"      分布：安全空返回 {safeCnt} 次，有效读出 {validCnt} 次");
+        }
+
+        // ============================================================
+        Section("共享缓冲区生命周期（验证文档写明的使用约束）");
+        // 文档告诉易语言开发者：「返回值指针不要跨调用保存，要立刻复制成文本」。
+        // 这条约束到底是不是真的、是否被正确实现，一直没直接测过。
+        // 这里验证两件事：
+        //   1. 确实复用同一块缓冲区（所以「不能保存指针」是真实约束，不是吓唬人）
+        //   2. 指针在本次调用到下一次调用之间内容正确（所以「立刻复制」是可行的）
+        {
+            IntPtr p1 = _optList();
+            string s1 = Take(p1);
+            bool p1valid = s1 != null && s1.Contains("优化进程数量");
+
+            Take(_version());                       // 中间插一次调用，指向同一块缓冲区
+            string s1after = Take(p1);
+            bool reused = s1after != null && (s1after != s1);
+            bool stillJson = s1after != null && JsonBalanced(s1after);
+
+            IntPtr p2 = _version();
+            string s2 = Take(p2);
+
+            Chk(p1valid, "首次调用返回的指针内容正确（可安全「立刻复制」）");
+            Chk(p2 == p1, "两次调用复用同一块缓冲区地址（证实「不能保存指针」是真实约束）", $"0x{p1.ToInt64():X}");
+            Chk(reused && stillJson, "后一次调用覆盖了前一次内容（旧指针拿到的是新数据）");
+            Chk(s2 != null && s2.Contains("\"version\""), "新指针内容正确");
+            Console.WriteLine("      ⚠ 结论：在两次调用之间保存指针会读到别的数据 —— 必须每次调用后立刻复制成文本");
+        }
+
+        // ============================================================
+        Section("长稳与资源泄漏（连续 5000 次调用）");
+        {
+            var proc = System.Diagnostics.Process.GetCurrentProcess();
+            for (int i = 0; i < 30; i++) { Take(_version()); Take(_optList()); }   // 预热，把一次性初始化做掉
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            proc.Refresh();
+            long mem0 = proc.WorkingSet64;
+            int h0 = proc.HandleCount;
+
+            for (int i = 0; i < 2500; i++)
+            {
+                Take(_version());
+                Take(_optList());
+                // 硬件检测走 WMI，单次 1~3 秒；只为验证「反复调用不泄漏」，
+                // 偶尔来一次就够，塞太密会让 CI 跑十几分钟。
+                if (i % 500 == 0) Take(_hardware(1));
+            }
+
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+            proc.Refresh();
+            long mem1 = proc.WorkingSet64;
+            int hAfter = proc.HandleCount;
+            long dMem = (mem1 - mem0) / 1024;
+            int dHnd = hAfter - h0;
+
+            Chk(dMem < 16384, "5000 次调用后内存无明显增长（< 16 MB）", $"Δ {dMem} KB");
+            Chk(dHnd <= 30, "句柄数稳定（无句柄泄漏）", $"Δ {dHnd}（{h0} → {hAfter}）");
+            Console.WriteLine($"      基准内存 {mem0 / 1024 / 1024} MB → {mem1 / 1024 / 1024} MB");
+        }
 
         // 收尾
         try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
