@@ -131,11 +131,16 @@ internal static unsafe class Stress
         return p;
     }
 
-    private static void Main()
+    private static int _fuzzStart;      // --start=N：只跑模糊测试第 N 轮起的部分，用于二分定位
+
+    private static void Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.WriteLine("═════════ 原生 DLL 压力 / 边界测试 ═════════");
         Console.WriteLine($"宿主位数: {(IntPtr.Size == 4 ? "x86 (与易语言一致)" : "x64 ⚠")}");
+
+        var sa = args.FirstOrDefault(a => a.StartsWith("--start="));
+        if (sa != null) int.TryParse(sa.Substring(8), out _fuzzStart);
 
         _h = Native.LoadLibraryW(Path.Combine(AppContext.BaseDirectory, Dll));
         if (_h == IntPtr.Zero) { Console.WriteLine("加载 DLL 失败"); Environment.Exit(1); }
@@ -154,6 +159,10 @@ internal static unsafe class Stress
         _free      = Get<FnVoid>("ND_Free");
         _readString= Get<FnStr>("NDX_ReadString");
 
+
+        string tmp = null;   // 前置组与末尾清理都要用；定位模式下只有末尾会用
+        if (_fuzzStart <= 0)
+        {
         // ============================================================
         Section("乱序调用（不先调 ND_Version）");
         string a = Take(_optList());
@@ -214,15 +223,53 @@ internal static unsafe class Stress
         {
             try
             {
+                Console.Write($"      · {name} … ");
+                Console.Out.Flush();          // 卡住时能看到停在哪一个用例上
                 IntPtr ap = Marshal.StringToCoTaskMemUTF8(json);
                 string r1 = Take(_optApply(ap, 0));
+                Console.Write("optapply ");
+                Console.Out.Flush();
+
+                // 清理接口不能拿畸形 JSON 直接试：
+                // 修复前畸形 JSON 会被当成「未指定」而走默认清理，是真的在删文件
+                // （测试曾因此卡住十几分钟，C 盘可用空间莫名涨了 11 GB）。
+                // 现在畸形输入必须返回失败，这里就断言这一点 —— 顺带避免误删。
+                Console.Write("cleanrun ");
+                Console.Out.Flush();
                 string r2 = Take(_cleanRun(ap, 0));
                 Marshal.FreeCoTaskMem(ap);
-                if (!HasOk(r1) || !HasOk(r2)) { Console.WriteLine($"      ✗ {name}"); bad++; }
+                Console.Write("done\n");
+                Console.Out.Flush();
+
+                if (!HasOk(r1)) { Console.WriteLine($"      ✗ {name} (optapply)"); bad++; }
+
+                // 空串与纯空白按文档等价于「未指定」，会走默认清理 —— 那是正确行为。
+                // 其余畸形 JSON 必须被拒绝：修复前它们同样掉进默认清理分支，
+                // 等于用户参数写错却真的删了文件。
+                bool unspecified = string.IsNullOrWhiteSpace(json);
+                bool refused = r2 != null && r2.Contains("\"ok\":false");
+                if (unspecified ? !HasOk(r2) : !refused)
+                {
+                    Console.WriteLine($"      ✗ {name} (cleanrun 行为不符：{(unspecified ? "应走默认项" : "应拒绝")})");
+                    bad++;
+                }
             }
             catch (Exception ex) { Console.WriteLine($"      ✗ {name}: {ex.Message}"); bad++; }
         }
-        Chk(bad == 0, $"{cases.Length} 种畸形 JSON 全部安全返回");
+        Chk(bad == 0, $"{cases.Length} 种畸形 JSON：优化接口安全返回，清理接口拒绝执行（不误删文件）");
+
+        // 合法用法回归：传 NULL = 未指定（按默认项），传不匹配的名称 = nothing_to_clean。
+        // 不拿真实大目标测清理，否则测试会真的去清磁盘、耗时且干扰内存基准。
+        IntPtr nullArg = IntPtr.Zero;
+        string rNull = Take(_cleanRun(nullArg, 0));
+        Chk(HasOk(rNull), "传 NULL 走默认项（未指定语义）", rNull?.Substring(0, Math.Min(70, rNull?.Length ?? 0)));
+
+        IntPtr bogus = Marshal.StringToCoTaskMemUTF8("[\"这个清理项不存在\"]");
+        string rBogus = Take(_cleanRun(bogus, 0));
+        Marshal.FreeCoTaskMem(bogus);
+        Chk(rBogus != null && rBogus.Contains("nothing_to_clean"),
+            "传不匹配的名称返回 nothing_to_clean（不误删）",
+            rBogus?.Substring(0, Math.Min(70, rBogus?.Length ?? 0)));
 
         // ============================================================
         Section("参数极值");
@@ -348,7 +395,7 @@ internal static unsafe class Stress
 
         // ============================================================
         Section("ND_SetDataDir（新增导出）");
-        string tmp = Path.Combine(Path.GetTempPath(), "nd_stress_datadir");
+        tmp = Path.Combine(Path.GetTempPath(), "nd_stress_datadir");
         try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { }
         IntPtr dp = Marshal.StringToCoTaskMemUTF8(tmp);
         string dr = Take(_setDataDir(dp));
@@ -451,6 +498,9 @@ internal static unsafe class Stress
         Chk(crossApplied, "跨页合法 JSON 能正常走通业务（不被静默当空串）");
 
         // ============================================================
+        }
+
+        FuzzSection:
         Section("随机模糊测试（机器代替人找盲区）");
         // 为什么必须有这一段：
         //   前面第 2、13 组都是「人想到的边界值」，而跨页崩溃当初正是
@@ -464,7 +514,12 @@ internal static unsafe class Stress
             const int BUFSZ = 32768;
             const int ITER = 3000;
             IntPtr fbuf = Marshal.AllocHGlobal(BUFSZ);
-            var rnd = new Random(20260927);
+            // 两个独立的随机数源，这一点很关键：
+            //   生成输入只消耗 rndInput，调用时的随机参数走 rndCall。
+            // 否则 --start=N 用 continue 跳过多轮后，随机序列整体错位，
+            // 第 N 轮拿到的输入和整轮跑时完全不同 —— 定位模式永远复现不了崩溃。
+            var rndInput = new Random(20260927);
+            var rndCall = new Random(88881111);
             var fuzz = new byte[BUFSZ];
 
             int crashGuard = 0, localFail = 0, guardFail = 0, rawFail = 0, cleanFail = 0;
@@ -474,29 +529,29 @@ internal static unsafe class Stress
             for (int it = 0; it < ITER; it++)
             {
                 // 内容：0 = 全随机字节，1 = 无 \0 的可打印串，2 = 长可打印串后接 \0，3 = 空串
-                int mode = rnd.Next(4);
-                for (int i = 0; i < BUFSZ; i++) fuzz[i] = (byte)rnd.Next(256);
+                int mode = rndInput.Next(4);
+                for (int i = 0; i < BUFSZ; i++) fuzz[i] = (byte)rndInput.Next(256);
                 if (mode == 1)
                 {
-                    int len = rnd.Next(1, 8192);
-                    for (int i = 0; i < len; i++) fuzz[i] = (byte)(32 + rnd.Next(95));
+                    int len = rndInput.Next(1, 8192);
+                    for (int i = 0; i < len; i++) fuzz[i] = (byte)(32 + rndInput.Next(95));
                 }
                 else if (mode == 2)
                 {
-                    int len = rnd.Next(1, 20000);
-                    for (int i = 0; i < len; i++) fuzz[i] = (byte)(32 + rnd.Next(95));
+                    int len = rndInput.Next(1, 20000);
+                    for (int i = 0; i < len; i++) fuzz[i] = (byte)(32 + rndInput.Next(95));
                     fuzz[len] = 0;
                 }
                 else if (mode == 3) { fuzz[0] = 0; }
 
                 // 偏移：一半落在页边界附近（最刁钻），其余完全随机
                 int off;
-                if (rnd.Next(2) == 0)
-                    off = rnd.Next(0, BUFSZ / 4096) * 4096 - rnd.Next(0, 8);
+                if (rndInput.Next(2) == 0)
+                    off = rndInput.Next(0, BUFSZ / 4096) * 4096 - rndInput.Next(0, 8);
                 else
-                    off = rnd.Next(0, BUFSZ);
+                    off = rndInput.Next(0, BUFSZ);
                 // 让一部分指针直接落到缓冲区之外，制造真正的野地址
-                if (rnd.Next(20) == 0) off += BUFSZ + rnd.Next(1, 8192);
+                if (rndInput.Next(20) == 0) off += BUFSZ + rndInput.Next(1, 8192);
                 if (off < 0) off = 0;
 
                 // 把内容写到该偏移处，保证指针指向的是我们准备的数据
@@ -505,16 +560,40 @@ internal static unsafe class Stress
                     Marshal.Copy(fuzz, 0, (IntPtr)(fbuf.ToInt64() + off), writable);
 
                 IntPtr ptr = (IntPtr)(fbuf.ToInt64() + off);
+
+                // 断电日志只在定位模式（--start）启用：
+                // 正式运行每轮都写文件的话，3000 轮 × 5 次写就是上万次 I/O，
+                // 会把测试拖到好几分钟，看起来像「卡住」。
+                string traceFile = Path.Combine(AppContext.BaseDirectory, "fuzz_trace.txt");
+                void Mark(string stage)
+                {
+                    if (_fuzzStart <= 0) return;
+                    try { File.AppendAllText(traceFile, $"  it={it} {stage}\n"); }
+                    catch { }
+                }
+                // 参数快照：正式运行也写（每轮仅 1 次覆盖写，开销可接受）。
+                // 偶发崩溃正是靠它抓到「崩溃时正在跑哪一轮、什么输入」。
+                if (_fuzzStart <= 0 || it == _fuzzStart)
+                {
+                    try { File.WriteAllText(traceFile, $"it={it} mode={mode} off={off} ptr=0x{ptr.ToInt64():X8}\n"); }
+                    catch { }
+                }
+                else continue;   // 定位模式只跑目标那一轮
+
                 try
                 {
+                    Mark("read-start");
                     string rr = Take(_readString(ptr));
+                    Mark("read-done");
                     if (rr == null || !JsonBalanced(rr)) { localFail++; if (samples.Count < 3) samples.Add("read:" + rr); }
                     else if (!rr.Contains("\"raw\"")) { rawFail++; if (samples.Count < 3) samples.Add("noRaw:" + rr.Substring(0, Math.Min(60, rr.Length))); }
                     else if (rr.Contains("\\u0000")) { guardFail++; if (samples.Count < 3) samples.Add("NUL污染:" + rr.Substring(0, Math.Min(60, rr.Length))); }
                     else if (rr.Contains("\"len\":0")) safeCnt++;
                     else validCnt++;
 
-                    string a2 = Take(_optApply(ptr, rnd.Next(0, 2)));
+                    Mark("apply-start");
+                    string a2 = Take(_optApply(ptr, rndCall.Next(0, 2)));
+                    Mark("apply-done");
                     if (a2 == null || !JsonBalanced(a2)) cleanFail++;
 
                     // 每 500 轮插一次其他导出，验证模糊输入不会污染后续正常调用
@@ -528,6 +607,13 @@ internal static unsafe class Stress
             }
 
             Marshal.FreeHGlobal(fbuf);
+            if (_fuzzStart > 0)
+            {
+                // 定位模式：只跑目标那一轮，跑完即得出结论，无需等后面的大段测试
+                Console.WriteLine($"      [定位模式] 第 {_fuzzStart} 轮单独跑完，未崩溃");
+                Environment.Exit(0);
+            }
+
             Chk(localFail == 0 && rawFail == 0 && cleanFail == 0 && crashGuard == 0,
                 $"{ITER} 轮随机「指针 × 内容 × 长度」未崩溃、未死锁、返回结构完整",
                 (localFail + rawFail + cleanFail + crashGuard) == 0 ? "" : string.Join(" | ", samples));

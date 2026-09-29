@@ -165,6 +165,30 @@ internal static class Probe
         Console.WriteLine($"居然没崩，读到 0x{b:X2}");
     }
 
+    /// <summary>地址回绕分析：不做任何读取，只用 IPC / VirtualQuery 判断可读性</summary>
+    private static void DiagWrap(IntPtr p)
+    {
+        long v = p.ToInt64();
+        Console.WriteLine($"  指针 0x{v:X}  距 32 位上限还差 0x{0x100000000L - v:X} 字节");
+        Report(v);
+        Report(v + 4);          // 偏移几字节后
+        Report(v + 4096);       // 再往前一页
+        Console.WriteLine("  ↑ 若偏移后的地址「可读」，说明此处一旦发生 32 位回绕，");
+        Console.WriteLine("    就会从读野指针变成读合法内存 —— 行为不可预期。");
+
+        void Report(long a)
+        {
+            long wrapped = a & 0xFFFFFFFFL;
+            bool didWrap = a > 0xFFFFFFFFL;
+            var mbi = default(MEMORY_BASIC_INFORMATION);
+            IntPtr n = VirtualQuery((IntPtr)wrapped, out mbi, (IntPtr)Marshal.SizeOf<MEMORY_BASIC_INFORMATION>());
+            string state = n == IntPtr.Zero ? "VirtualQuery失败"
+                : $"State=0x{mbi.State:X} Protect=0x{mbi.Protect:X} " +
+                  (mbi.State == MEM_COMMIT && (mbi.Protect & PAGE_NOACCESS) == 0 ? "可读" : "不可读");
+            Console.WriteLine($"    0x{a:X} → 实际查询 0x{wrapped:X}{(didWrap ? " (已回绕!)" : "")}  {state}");
+        }
+    }
+
     private static void Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -204,6 +228,12 @@ internal static class Probe
             'p' => NearPageEnd(),             // 页尾起始、无 \0 终止符（不跨页）
             'q' => CrossPage(),               // 页尾起始、下一页不可访问（跨页攻击）
             'y' => CrossPageValid(),          // 正常跨页字符串（应被正确读出）
+            // 地址回绕：起始指针已接近 32 位地址空间上限，
+            // 若实现里用 p + 偏移 计算地址而不检查溢出，就会绕回低地址 ——
+            // 于是「读一个野指针」变成「读一块合法内存」，行为完全不可预期。
+            // 这两个值由模糊测试撞出来后补上，此前 10 种布局都没覆盖到。
+            'A' => new IntPtr(unchecked((int)0xFFFFFFF0)),
+            'B' => new IntPtr(unchecked((int)0x7FFFFFF0)),
             _   => IntPtr.Zero,
         };
 
@@ -214,6 +244,7 @@ internal static class Probe
             return;
         }
         if ("p q y".Contains(which)) Diag(arg);
+        if ("AB".Contains(which)) DiagWrap(arg);
         if (which == 'n')
         {
             // 基线：普通托管字符串，走同一条调用路径

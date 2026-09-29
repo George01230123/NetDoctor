@@ -419,7 +419,12 @@ internal static class NativeApi
     }
 
     /// <summary>按名称清理。names 为 JSON 字符串数组；为空则清理全部「默认勾选且非高危」项</summary>
-    public static string CleanRun(string namesJson, int includeRecycle)
+    /// <summary>
+    /// names 为 JSON 字符串数组；mode=apply 应用，mode=restore 还原。
+    /// namesUnspecified 为 true 表示宿主传的是 NULL 或空串（即「未指定」），
+    /// 与「传了内容但解析不出名称」必须区分开 —— 后者应报错而不是静默当空。
+    /// </summary>
+    public static string CleanRun(string namesJson, int includeRecycle, bool namesUnspecified = true)
     {
         return Guard("cleanrun", () =>
         {
@@ -427,10 +432,23 @@ internal static class NativeApi
             List<CleanItem> picked;
 
             var wanted = ParseStringArray(namesJson);
-            if (wanted.Count == 0)
+            if (namesUnspecified)
+            {
+                // 宿主明确表示「没指定」：按文档用默认项
                 picked = all.Where(i => i.DefaultOn && !i.HighRisk).ToList();
+            }
+            else if (wanted.Count == 0)
+            {
+                // 宿主提供了内容却解析不出任何名称（畸形 JSON / 非数组 / 空数组）：
+                // 以前这里会掉进「默认清理」分支，等于用户没要求却真的删了文件。
+                // 清理是破坏性操作，宁可什么都不做也不能猜用户意图。
+                return "{\"ok\":false,\"code\":\"empty\",\"error\":" +
+                       J("未指定清理项或 JSON 无法解析（名称要与 ND_CleanScan 返回的 name 完全一致）") + "}";
+            }
             else
+            {
                 picked = all.Where(i => wanted.Contains(i.Name)).ToList();
+            }
 
             if (includeRecycle != 0 && !picked.Any(p => p.Name.Contains("回收站")))
                 picked.AddRange(all.Where(i => i.Name.Contains("回收站")));

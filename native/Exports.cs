@@ -159,37 +159,48 @@ internal static class Exports
     ///     ReadProcessMemory 成功但只返回 0 字节的情况就死循环，
     ///     表现为宿主调用后卡住不返回 —— 已按此不变量重写。）
     ///
+    /// 32 位下必须防地址回绕：
+    ///   起始指针可能已经接近 0xFFFFFFFF（模糊测试随机生成的野地址就是），
+    ///   此时 p + total 会溢出 32 位并绕回低地址，
+    ///   于是「读一个野指针」变成「读一块合法内存」，行为完全不可预期。
+    ///   每一轮都先校验加上偏移后仍落在合法用户态范围内，否则当场收尾。
+    ///
     /// 数据全部来自调用方自身进程（P/Invoke 同进程传参），因此不存在
     /// 「读别的进程内存」的权限与隐私问题。
     /// </summary>
+    private const long UserMax = 0x7FFF0000L;      // 32 位用户态上限，留一点余量
+
     private static int ScanString(IntPtr p, int max)
     {
         if (p == IntPtr.Zero || max <= 0) return 0;
 
+        long pbase = p.ToInt64();
+        if (pbase < 0x10000L || pbase >= UserMax) return 0;
+
         IntPtr self = GetCurrentProcess();
-        byte[] chunk = null;
+        byte[] chunk = new byte[4096];
         int total = 0;
 
-        while (total < max)
+        while (total < max && total < 0x100000)
         {
-            IntPtr cur = (IntPtr)(p.ToInt64() + total);
+            long curL = pbase + total;
+            if (curL < 0x10000L || curL >= UserMax) return total;   // 防回绕
+
+            IntPtr cur = (IntPtr)curL;
 
             // 一次只读到「当前所在页的页尾」，绝不跨页请求：
             // 跨页请求会被内核整块拒绝，反而读不到本页末尾的有效数据。
-            int pageLeft = 4096 - (int)(cur.ToInt64() & 0xFFF);
+            int pageLeft = 4096 - (int)(curL & 0xFFF);
             int want = Math.Min(pageLeft, max - total);
             if (want <= 0) return total;                   // 页大小异常，保守收尾
-
-            if (chunk == null || chunk.Length < want) chunk = new byte[want];
 
             IntPtr got;
             if (!ReadProcessMemory(self, cur, chunk, (IntPtr)want, out got))
             {
-                // 本页尾部不可读：缩短到半个剩余量再试；
+                // 本页尾部不可读：缩短到一半再试；
                 // 缩到 1 字节仍失败，说明当前位置就是边界，到此为止。
                 if (want <= 1) return total;
                 want >>= 1;
-                if (chunk.Length < want) chunk = new byte[want];
                 if (!ReadProcessMemory(self, cur, chunk, (IntPtr)want, out got))
                     return total;
             }
@@ -329,10 +340,18 @@ internal static class Exports
     [UnmanagedCallersOnly(EntryPoint = "ND_CleanScan", CallConvs = new[] { typeof(CallConvStdcall) })]
     public static IntPtr CleanScan() => Return(NativeApi.CleanScan());
 
-    /// <summary>ND_CleanRun(namesJson, includeRecycle) —— namesJson: UTF-8 JSON 字符串数组，空则用默认项</summary>
+    /// <summary>
+    /// ND_CleanRun(namesJson, includeRecycle) —— namesJson: UTF-8 JSON 字符串数组。
+    /// 传 NULL 或空串表示「未指定」，按默认项清理；
+    /// 传了内容但解析不出名称则返回 empty 错误 —— 清理是破坏性操作，
+    /// 参数无效时不能猜用户意图去删文件。
+    /// </summary>
     [UnmanagedCallersOnly(EntryPoint = "ND_CleanRun", CallConvs = new[] { typeof(CallConvStdcall) })]
     public static IntPtr CleanRun(IntPtr namesJson, int includeRecycle)
-        => Return(NativeApi.CleanRun(ArgSafe(namesJson), includeRecycle));
+    {
+        string s = ArgSafeEx(namesJson, out bool wasNull);
+        return Return(NativeApi.CleanRun(s, includeRecycle, wasNull || string.IsNullOrWhiteSpace(s)));
+    }
 
     // ===============================================================
     // 6. 硬件

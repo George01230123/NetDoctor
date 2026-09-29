@@ -53,7 +53,7 @@ Releases 里同时提供 **`NetDoctorNative.dll`** —— 给 32 位易语言程
   统一返回 **UTF-8 JSON**，内存由 DLL 自管
 - 非法指针、畸形 JSON、参数极值均安全返回，**绝不崩溃宿主**
 - 与主程序**共用同一份 Core 源码**，不复制代码
-- 三层测试守着：契约 **32 项**、压力/边界 **38 项**、页边界探测 **10 种布局**，全部通过
+- 三层测试守着：契约 **32 项**、压力/边界 **40 项**、页边界探测 **12 种布局**，全部通过
 
 > 「绝不崩溃宿主」这句话是被测试逼出来的。入参读取这一小段代码前后修了两轮：
 > 第一轮只校验起始页，于是「字符串从页尾开始」的布局会把宿主进程直接干掉；
@@ -159,11 +159,11 @@ dotnet build selftest/SelfTest.csproj -c Release
 dotnet publish native-test/NetDoctorNativeTest.csproj -c Release -r win-x86
 .\native-test\bin\Release\net10.0\win-x86\publish\NetDoctorNativeTest.exe
 
-# 3) 原生 DLL 压力/边界测试（野指针、页边界、3000 轮模糊、资源泄漏，38 项断言）
+# 3) 原生 DLL 压力/边界测试（野指针、页边界、3000 轮模糊、资源泄漏，40 项断言）
 dotnet publish native-test/StressTest.csproj -c Release -r win-x86 -o _t\stress
 .\_t\stress\NetDoctorStressTest.exe
 
-# 4) 页边界探测（10 种指针布局，逐个用独立进程跑，任何一次崩溃即失败）
+# 4) 页边界探测（12 种指针布局，逐个用独立进程跑，任何一次崩溃即失败）
 dotnet publish native-test/CrashProbe.csproj -c Release -r win-x86 -o _t\probe
 #    布局：z=空指针 1=0x1 m=0xFFFFFFFF s=0x1000 h=0xDEADBEEF t=0x40000000
 #          p=页尾无终止符 q=页尾+次页不可访问 y=跨页合法JSON w=跨页只读字符串

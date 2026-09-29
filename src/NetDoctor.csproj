@@ -10,10 +10,10 @@
     <AssemblyName>夕颜若雪网络工具</AssemblyName>
     <RootNamespace>NetDoctor</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.4.4</Version>
+    <Version>1.4.5</Version>
     <Product>夕颜若雪网络工具</Product>
-    <FileVersion>1.4.4.0</FileVersion>
-    <AssemblyVersion>1.4.4.0</AssemblyVersion>
+    <FileVersion>1.4.5.0</FileVersion>
+    <AssemblyVersion>1.4.5.0</AssemblyVersion>
     <Company>George01230123</Company>
     <Copyright>网络检测 / 断网修复 / 网络优化 / Windows优化 / 系统工具 / 硬件检测</Copyright>
     <Description>一体化 Windows 系统工具：网络诊断修复、Windows 优化、垃圾清理、应用/服务/启动项管理、硬件检测与跑分</Description>
