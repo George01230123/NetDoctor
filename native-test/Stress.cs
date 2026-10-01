@@ -496,11 +496,9 @@ internal static unsafe class Stress
         Chk(pageOk, "页尾起始 + 次页不可访问：不崩溃且安全返回（越界读会直接崩进程）");
         Chk(crossOk, "跨页合法字符串被完整读出、且尾部无多余 NUL", crossDetail.Length > 40 ? crossDetail.Substring(0, 40) : crossDetail);
         Chk(crossApplied, "跨页合法 JSON 能正常走通业务（不被静默当空串）");
-
-        // ============================================================
         }
 
-        FuzzSection:
+        // ============================================================
         Section("随机模糊测试（机器代替人找盲区）");
         // 为什么必须有这一段：
         //   前面第 2、13 组都是「人想到的边界值」，而跨页崩溃当初正是
@@ -528,6 +526,14 @@ internal static unsafe class Stress
 
             for (int it = 0; it < ITER; it++)
             {
+                // 阶段性进度：CI 上出问题时，日志里能看出走到哪一轮，
+                // 否则只能看到一个光秃秃的 exit code。
+                if (it > 0 && it % 500 == 0)
+                {
+                    Console.WriteLine($"      … 已完成 {it}/{ITER} 轮");
+                    Console.Out.Flush();
+                }
+
                 // 内容：0 = 全随机字节，1 = 无 \0 的可打印串，2 = 长可打印串后接 \0，3 = 空串
                 int mode = rndInput.Next(4);
                 for (int i = 0; i < BUFSZ; i++) fuzz[i] = (byte)rndInput.Next(256);
@@ -571,12 +577,20 @@ internal static unsafe class Stress
                     try { File.AppendAllText(traceFile, $"  it={it} {stage}\n"); }
                     catch { }
                 }
-                // 参数快照：正式运行也写（每轮仅 1 次覆盖写，开销可接受）。
-                // 偶发崩溃正是靠它抓到「崩溃时正在跑哪一轮、什么输入」。
-                if (_fuzzStart <= 0 || it == _fuzzStart)
+                // 只在定位模式（--start）记录断电日志。
+                // 正式运行**不要**逐轮写文件：3000 轮 × 每轮一次覆盖写，
+                // 在 CI 那种慢盘上是上万次元数据操作，既拖慢测试，
+                // 本身也成了新的失败诱因（它是我为排查引入的，不是被测对象的一部分）。
+                if (_fuzzStart > 0)
                 {
-                    try { File.WriteAllText(traceFile, $"it={it} mode={mode} off={off} ptr=0x{ptr.ToInt64():X8}\n"); }
+                    try
+                    {
+                        File.WriteAllText(
+                            Path.Combine(AppContext.BaseDirectory, "fuzz_trace.txt"),
+                            $"it={it} mode={mode} off={off} ptr=0x{ptr.ToInt64():X8}\n");
+                    }
                     catch { }
+                    if (it != _fuzzStart) continue;
                 }
                 else continue;   // 定位模式只跑目标那一轮
 
