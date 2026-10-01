@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Defender 体检模块的验证宿主（独立于 SelfTest）：
+    SelfTest 会跑清理/优化等会改动系统的用例，而这里只验证只读体检，
+    不应受那些副作用影响，所以单独一个工程。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>NetDoctorDefenderTest</AssemblyName>
+    <RootNamespace>NetDoctorTest</RootNamespace>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <NoWarn>CA1416;WFO1000;WFO0003</NoWarn>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\Core\*.cs" LinkBase="Core" />
+    <EmbeddedResource Include="..\src\Core\nettop.ps1" LogicalName="NetDoctor.Data.nettop.ps1" />
+    <EmbeddedResource Include="..\src\Core\sysitems.ps1" LogicalName="NetDoctor.Data.sysitems.ps1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

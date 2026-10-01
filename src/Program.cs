@@ -50,7 +50,17 @@ internal static class Program
                     await Task.Delay(2000);
                     form.ShowView(view);
                     if (view == "diag") await form.ViewDiag.RunFullAsync(false);
-                    if (view == "tools") await form.ViewTools.AutoScanAsync();
+                    if (view == "tools")
+                    {
+                        await form.ViewTools.AutoScanAsync();
+                        // --tab=N 指定系统工具页内的标签（0=垃圾清理 … 5=安全中心）
+                        var tb = args.FirstOrDefault(a => a.StartsWith("--tab="));
+                        if (tb != null && int.TryParse(tb.Substring(6), out int ti))
+                        {
+                            form.ViewTools.SelectTab(ti);
+                            if (ti == 5) await form.ViewTools.AutoScanSecurityAsync();
+                        }
+                    }
                     if (view == "hardware")
                     {
                         int tab = 0;

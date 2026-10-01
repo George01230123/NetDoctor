@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.IO;
 using System.Text;
 using System.Windows.Forms;
 using NetDoctor.Core;
@@ -13,6 +14,9 @@ internal sealed class SystemToolsView : Panel
     private readonly Label _status = new();
     private readonly ProgressBar _progress = new();
     private bool _busy, _loaded;
+
+    // --- 安全中心 ---
+    private readonly TextBox _secBox = new();
 
     // --- 清理 ---
     private readonly TreeView _cleanTree = new();
@@ -77,6 +81,7 @@ internal sealed class SystemToolsView : Panel
         _tabs.TabPages.Add(BuildSvcPage());
         _tabs.TabPages.Add(BuildStartPage());
         _tabs.TabPages.Add(BuildActivatePage());
+        _tabs.TabPages.Add(BuildSecurityPage());
 
         Controls.Add(_tabs);
         Controls.Add(bar);
@@ -520,8 +525,120 @@ internal sealed class SystemToolsView : Panel
         return page;
     }
 
-    private void LoadServices()
+    // ===============================================================
+    // 安全中心（Defender 体检）
+    //
+    // 只读：不改注册表、不启停服务。这里刻意不提供「关闭 Defender」类功能 ——
+    // 那会降低本机安全性，而且实测那类操作需要 TrustedInstaller 权限，
+    // 本工具以管理员身份运行时也做不到。
+    // ===============================================================
+
+    /// <summary>供 --autotest 使用：切到指定标签页（越界自动忽略）</summary>
+    public void SelectTab(int index)
     {
+        if (index >= 0 && index < _tabs.TabPages.Count) _tabs.SelectedIndex = index;
+    }
+
+    /// <summary>供 --autotest 使用：自动跑一次安全中心体检</summary>
+    public Task AutoScanSecurityAsync() => RunSecurityScan();
+
+    private string _secReport = "";
+
+    private TabPage BuildSecurityPage()
+    {
+        var page = new TabPage("安全中心") { BackColor = Theme.Bg, Padding = new Padding(0) };
+
+        var tip = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 34,
+            ForeColor = Theme.Idle,
+            Font = Theme.F(9f),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding = new Padding(2, 0, 0, 0),
+            Text = "只读体检：检查 Defender 的引擎、服务、进程与策略状态，并识别第三方杀软接管情况。不会修改任何设置。",
+        };
+
+        var btns = new Panel { Dock = DockStyle.Bottom, Height = 48, BackColor = Color.Transparent };
+
+        var bScan = Theme.Btn("开始体检", 100, 34, true);
+        bScan.Location = new Point(0, 6);
+        bScan.Click += async (_, _) => await RunSecurityScan();
+
+        var bCopy = Theme.Btn("复制报告", 100, 34);
+        bCopy.Location = new Point(112, 6);
+        bCopy.Click += (_, _) =>
+        {
+            try
+            {
+                if (_secReport.Length > 0) Clipboard.SetText(_secReport);
+                Log.Ok("安全中心报告已复制到剪贴板");
+            }
+            catch (Exception ex) { Log.Err("复制失败：" + ex.Message); }
+        };
+
+        var bSave = Theme.Btn("导出到文件", 110, 34);
+        bSave.Location = new Point(224, 6);
+        bSave.Click += (_, _) =>
+        {
+            try
+            {
+                if (_secReport.Length == 0) { Log.Warn("请先执行体检"); return; }
+                // 存到桌面：比藏进 .runtime 更容易找到
+                string dir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                if (string.IsNullOrEmpty(dir)) dir = Environment.CurrentDirectory;
+                var f = Path.Combine(dir, $"安全中心体检_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                File.WriteAllText(f, _secReport, Encoding.UTF8);
+                Log.Ok("已导出到桌面：" + Path.GetFileName(f));
+            }
+            catch (Exception ex) { Log.Err("导出失败：" + ex.Message); }
+        };
+
+        btns.Controls.Add(bScan);
+        btns.Controls.Add(bCopy);
+        btns.Controls.Add(bSave);
+
+        _secBox.Dock = DockStyle.Fill;
+        _secBox.Multiline = true;
+        _secBox.ReadOnly = true;
+        _secBox.ScrollBars = ScrollBars.Both;
+        _secBox.WordWrap = false;
+        _secBox.BackColor = Theme.Card;
+        _secBox.ForeColor = Theme.Text;
+        _secBox.BorderStyle = BorderStyle.None;
+        _secBox.Font = Theme.F(9f);
+        _secBox.Text = "点击「开始体检」检查 Windows 安全中心状态。\r\n\r\n" +
+                       "本页只读：只检查，不修改任何设置。\r\n" +
+                       "本工具不提供关闭 Defender 的功能 —— 那会降低本机安全性。";
+
+        page.Controls.Add(_secBox);
+        page.Controls.Add(btns);
+        page.Controls.Add(tip);
+        return page;
+    }
+
+    private async Task RunSecurityScan()
+    {
+        _secBox.Text = "正在体检…\r\n";
+        try
+        {
+            var r = await Task.Run(() => DefenderStatus.Scan());
+            _secReport = DefenderStatus.BuildReport(r);
+            _secBox.Text = _secReport;
+            _secBox.SelectionStart = 0;
+
+            if (r.Level == "bad") Log.Err("安全中心体检：" + r.Verdict);
+            else if (r.Level == "warn") Log.Warn("安全中心体检：" + r.Verdict);
+            else Log.Ok("安全中心体检：" + r.Verdict);
+        }
+        catch (Exception ex)
+        {
+            _secBox.Text = "体检失败：" + ex.Message;
+            Log.Err("安全中心体检失败：" + ex.Message);
+        }
+    }
+
+    private void LoadServices()    {
         try
         {
             string kw = (_svcFilter.Text ?? "").Trim();

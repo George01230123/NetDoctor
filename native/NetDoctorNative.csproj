@@ -34,9 +34,9 @@
     <IlcGenerateCompleteTypeMetadata>false</IlcGenerateCompleteTypeMetadata>
     <IlcDisableReflection>true</IlcDisableReflection>
 
-    <Version>1.4.5</Version>
-    <FileVersion>1.4.5.0</FileVersion>
-    <AssemblyVersion>1.4.5.0</AssemblyVersion>
+    <Version>1.5.0</Version>
+    <FileVersion>1.5.0.0</FileVersion>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
     <Product>夕颜若雪网络工具 原生接口</Product>
     <Company>George01230123</Company>
     <Copyright>网络诊断 / 断网修复 / DNS 优化 / 垃圾清理 / 硬件检测</Copyright>
