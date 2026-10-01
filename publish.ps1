@@ -142,6 +142,43 @@ if (-not $SkipNative) {
         if ($code -ne 0) { throw "原生 DLL 压力测试未通过（退出码 $code）" }
         Good '原生 DLL 压力测试通过'
     }
+
+    # ---- 核心引擎自测 ----
+    # 24 组全是只读的（枚举 / 读取 / 连通性检测），不会改动系统，
+    # 所以适合放在发布前的门槛里。此前它只在 CI 跑，本地发布时漏掉了。
+    $selfProj = Join-Path $root 'selftest\SelfTest.csproj'
+    if (-not $SkipTest -and (Test-Path $selfProj)) {
+        Dim '正在跑核心引擎自测（网卡/DNS/优化配置/清理目标/硬件/工具扫描）…'
+        $spub2 = Join-Path $tdir 'self'
+        dotnet build $selfProj -c Release --nologo -o $spub2 | Out-Null
+        $selfExe = Join-Path $spub2 'NetDoctorSelfTest.exe'
+        if (Test-Path $selfExe) {
+            & $selfExe
+            $code = $LASTEXITCODE
+            if ($code -ne 0) { throw "核心引擎自测未通过（退出码 $code）" }
+            Good '核心引擎自测通过'
+        } else {
+            Warn '未生成 NetDoctorSelfTest.exe，跳过'
+        }
+    }
+
+    # ---- 安全中心体检自测 ----
+    # 新功能之前只在 CI 之外单独跑，本地发布时不会验证到，这里补进门槛。
+    $defProj = Join-Path $root 'defender-test\DefenderTest.csproj'
+    if (-not $SkipTest -and (Test-Path $defProj)) {
+        Dim '正在跑安全中心体检自测（判定准确性 / 只读性 / 解析健壮性）…'
+        $dpub = Join-Path $tdir 'defender'
+        dotnet build $defProj -c Release --nologo -o $dpub | Out-Null
+        $defExe = Join-Path $dpub 'NetDoctorDefenderTest.exe'
+        if (Test-Path $defExe) {
+            & $defExe
+            $code = $LASTEXITCODE
+            if ($code -ne 0) { throw "安全中心体检自测未通过（退出码 $code）" }
+            Good '安全中心体检自测通过'
+        } else {
+            Warn '未生成 NetDoctorDefenderTest.exe，跳过'
+        }
+    }
 } else {
     Section '3/5 跳过原生 DLL'
 }
