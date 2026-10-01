@@ -76,6 +76,16 @@ jobs:
           native-test/bin/Release/net10.0/win-x86/publish/NetDoctorStressTest.exe
         shell: pwsh
 
+      # 安全中心体检：只在 --ci 下跑「契约」类断言（结构完整、内容有效、
+      # 解析健壮性、只读性、重复调用稳定）。涉及本机真实状态的项
+      # （平台目录是否为空、MsMpEng 是否在跑、有无第三方杀软、禁用策略的值）
+      # 在 runner 上结论必然不同，会标成 [env] 跳过，不计入失败。
+      - name: 安全中心体检自测
+        run: |
+          dotnet build defender-test/DefenderTest.csproj -c Release -o defender-test-out
+          defender-test-out/NetDoctorDefenderTest.exe --ci
+        shell: pwsh
+
       # softprops/action-gh-release 对非 ASCII 文件名支持有问题，
       # 中文名的 exe 传上去会变成 default.exe，所以先复制一份 ASCII 名再上传。
       - name: 为 Release 准备 ASCII 文件名

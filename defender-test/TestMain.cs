@@ -16,10 +16,30 @@ internal static class DefenderTestMain
 {
     private static int _fail, _pass;
 
+    /// <summary>
+    /// CI 模式：只判定与运行环境无关的「契约」类断言。
+    ///
+    /// 有几项断言依赖本机真实状态（平台目录是否为空、MsMpEng 是否在跑、
+    /// 有没有第三方杀软、DisableAntiSpyware 的值），在 GitHub runner 上
+    /// 结论必然不同 —— 那些项标成 [env] 跳过，不计入失败，避免误报。
+    /// </summary>
+    private static bool _ci;
+
     private static void Chk(bool ok, string name, string detail = "")
     {
         Console.WriteLine($"  [{(ok ? "PASS" : "FAIL")}] {name}{(detail.Length > 0 ? "   " + detail : "")}");
         if (ok) _pass++; else _fail++;
+    }
+
+    /// <summary>环境相关断言：CI 模式下标注跳过，不计入成败</summary>
+    private static void Env(bool ok, string name, string detail = "")
+    {
+        if (_ci)
+        {
+            Console.WriteLine($"  [env]  {name}（CI 模式跳过，本机状态相关）");
+            return;
+        }
+        Chk(ok, name, detail);
     }
 
     private static void Head(string t) { Console.WriteLine(); Console.WriteLine("=== " + t + " ==="); }
@@ -27,8 +47,10 @@ internal static class DefenderTestMain
     private static int Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
+        _ci = args.Any(a => a.Equals("--ci", StringComparison.OrdinalIgnoreCase));
         Console.WriteLine("═════════ Defender 体检模块验证 ═════════");
         Console.WriteLine("（全程只读，不会修改任何系统设置）");
+        if (_ci) Console.WriteLine("模式：CI（跳过依赖本机真实状态的断言）");
 
         // ---------- 只读性基线：记录若干关键位置的状态 ----------
         Head("0. 建立只读性基线");
@@ -74,28 +96,28 @@ internal static class DefenderTestMain
         Console.WriteLine($"    （实测：目录存在={platformDirExists}，文件数={platformFiles}）");
         if (platformDirExists && platformFiles == 0)
         {
-            Chk(platform != null && platform.Level == "bad",
+            Env(platform != null && platform.Level == "bad",
                 "平台目录为空时判定为「异常」（这是 WMI 查不到、却最关键的故障信息）",
                 platform?.Value ?? "");
         }
         else
         {
-            Chk(platform != null && platform.Level == "ok", "平台目录有文件时判定为正常", platform?.Value ?? "");
+            Env(platform != null && platform.Level == "ok", "平台目录有文件时判定为正常", platform?.Value ?? "");
         }
 
         var proc = r.Checks.FirstOrDefault(c => c.Name == "关键进程");
         Chk(proc != null, "存在「关键进程」检查项");
         bool msmpen = System.Diagnostics.Process.GetProcessesByName("MsMpEng").Length > 0;
         Console.WriteLine($"    （实测：MsMpEng 在运行={msmpen}）");
-        Chk(proc != null && (msmpen ? proc.Level == "ok" : proc.Level == "bad"),
+        Env(proc != null && (msmpen ? proc.Level == "ok" : proc.Level == "bad"),
             "关键进程判定与实际进程状态一致", proc?.Value ?? "");
 
         // 结论必须与检查项自洽：有 bad 项、且没有第三方杀软真在顶着时，结论不能是"正常"
         bool hasBad = r.Checks.Any(c => c.Level == "bad");
         if (hasBad && !r.ThirdPartyActive)
-            Chk(r.Level != "ok", "存在异常项且无第三方杀软接管时，结论不能报「正常」", $"结论级别={r.Level}");
+            Env(r.Level != "ok", "存在异常项且无第三方杀软接管时，结论不能报「正常」", $"结论级别={r.Level}");
         else if (hasBad && r.ThirdPartyActive)
-            Chk(r.Level == "ok", "有第三方杀软在运行时，Defender 停用不判为故障", $"结论级别={r.Level}");
+            Env(r.Level == "ok", "有第三方杀软在运行时，Defender 停用不判为故障", $"结论级别={r.Level}");
         else
             Chk(true, "结论与检查项自洽（无冲突）", $"结论级别={r.Level}");
 
@@ -110,14 +132,14 @@ internal static class DefenderTestMain
         // 第三方杀软必须被"确认在运行"才认，避免把卸载残留当成有效防护
         if (r.ThirdPartyActive)
         {
-            Chk(true, "已确认第三方杀软正在运行（非仅注册表残留）", r.Checks
+            Env(true, "已确认第三方杀软正在运行（非仅注册表残留）", r.Checks
                 .FirstOrDefault(c => c.Name == "已注册杀软")?.Note ?? "");
         }
         else
         {
             bool onlyDef = avNames.All(n => n.IndexOf("Defender", StringComparison.OrdinalIgnoreCase) >= 0);
             Console.WriteLine($"    （未确认到运行中的第三方杀软；仅 Defender={onlyDef}）");
-            Chk(true, "未确认第三方杀软运行时未误报为「已受保护」");
+            Env(true, "未确认第三方杀软运行时未误报为「已受保护」");
         }
 
         // ---------- 3c. 不得把脚本源码当成检测值（回归防线）----------
@@ -154,13 +176,13 @@ internal static class DefenderTestMain
         int? das = ReadDword(@"SOFTWARE\Microsoft\Windows Defender", "DisableAntiSpyware");
         Console.WriteLine($"    （实测：DisableAntiSpyware = {(das.HasValue ? das.Value.ToString() : "(不存在)")}）");
         if (das.HasValue && das.Value != 0)
-            Chk(policy != null && policy.Level == "bad", "DisableAntiSpyware≠0 时判定为异常", policy?.Value ?? "");
+            Env(policy != null && policy.Level == "bad", "DisableAntiSpyware≠0 时判定为异常", policy?.Value ?? "");
         else
-            Chk(true, "策略标志与判定方向一致（当前无禁用标志）", policy?.Value ?? "");
+            Env(true, "策略标志与判定方向一致（当前无禁用标志）", policy?.Value ?? "");
 
         // 说明文字里要提示"普通管理员改不了"，否则用户会以为这是本工具能修的
         if (policy != null && policy.Level == "bad")
-            Chk(policy.Note.Contains("SYSTEM") || policy.Note.Contains("管理员"),
+            Env(policy.Note.Contains("SYSTEM") || policy.Note.Contains("管理员"),
                 "异常时说明了「该键受保护、普通管理员无法修改」");
 
         // ---------- 5. 输出格式 ----------
