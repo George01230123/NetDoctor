@@ -108,6 +108,43 @@ jobs:
           "dllsize=$dm"    >> $env:GITHUB_OUTPUT
           "sha=$sha"       >> $env:GITHUB_OUTPUT
           "dllsha=$dsha"   >> $env:GITHUB_OUTPUT
+
+          # 从 CHANGELOG 抽出本版更新要点，让 Release 说明里直接能看到
+          # 「这一版更新了什么」—— 否则用户点进更新页只有通用的功能列表。
+          $tag = '${{ github.ref_name }}'
+          $chg = ''
+          if (Test-Path 'CHANGELOG.md') {
+            $txt = Get-Content 'CHANGELOG.md' -Raw -Encoding UTF8
+            $ver = $tag -replace '^v', ''
+            $m = [regex]::Match($txt, "(?s)## \[$([regex]::Escape($ver))\][^\n]*\n(.*?)(?=\r?\n## \[|\z)")
+            if ($m.Success) {
+              $items = @()
+              foreach ($line in ($m.Groups[1].Value -split "`n")) {
+                $t = $line.Trim()
+                if ($t -match '^###\s+(.+)$') { $items += "**$($Matches[1])**" ; continue }
+                if ($t -match '^[-*]\s+(.+)$') {
+                  $s = $Matches[1] -replace '\*\*','' -replace '`',''
+                  # 只取标题句，去掉后面的细节，避免说明过长
+                  $s = ($s -split '[，。；]')[0]
+                  if ($s.Length -gt 46) { $s = $s.Substring(0,46) + '…' }
+                  $items += "- $s"
+                }
+              }
+              if ($items.Count -gt 0) { $chg = ($items | Select-Object -First 14) -join "`n" }
+            } else {
+              Write-Host "CHANGELOG 里没有 $ver 章节，更新说明留空"
+            }
+          }
+          if ($chg) {
+            $dl = "EOF_" + [guid]::NewGuid().ToString('N')
+            "changes<<$dl" >> $env:GITHUB_OUTPUT
+            $chg        >> $env:GITHUB_OUTPUT
+            $dl         >> $env:GITHUB_OUTPUT
+            Write-Host "更新说明已提取 $($chg.Split("`n").Count) 行"
+          } else {
+            "changes=" >> $env:GITHUB_OUTPUT
+          }
+
           Write-Host "主程序：$mb MB  SHA256=$sha"
           Write-Host "原生DLL：$dm MB  SHA256=$dsha"
 
@@ -153,6 +190,11 @@ jobs:
           body: |
             ## 夕颜若雪网络工具 ${{ github.ref_name }}
 
+            ### 本版更新
+            ${{ steps.info.outputs.changes }}
+
+            ---
+
             两个产物，按需下载：
 
             ### 1. 独立程序 `NetDoctor-win-x64.exe`（${{ steps.info.outputs.size }} MB）
@@ -163,13 +205,14 @@ jobs:
 
             ### 2. 原生接口库 `NetDoctorNative.dll`（${{ steps.info.outputs.dllsize }} MB，x86）
             给 **32 位易语言**程序 `LoadLibrary` 调用的原生 DLL，NativeAOT 编译，**宿主无需安装 .NET**。
-            15 个 `__stdcall` 导出函数，统一返回 UTF-8 JSON。
+            17 个 `__stdcall` 导出函数（另有 1 个诊断导出 `NDX_ReadString`），统一返回 UTF-8 JSON。
             - SHA256：`${{ steps.info.outputs.dllsha }}`
             - 用法见 `docs/原生接口.md` 与 `docs/易语言接入.md`
 
             ### 功能
             网络检测 / 断网修复 / 网络优化 · Windows 优化（151 项）
-            · 垃圾清理 / 应用管理 / 系统服务 / 启动项 · 硬件检测 / 工具启动器 / 性能测试 / 屏幕测试
+            · 垃圾清理 / 应用管理 / 系统服务 / 启动项 / 安全中心体检
+            · 硬件检测 / 工具启动器 / 性能测试 / 屏幕测试
 
             ### 说明
             - 所有写操作都会在 `backup/` 下留快照，可对照回滚
