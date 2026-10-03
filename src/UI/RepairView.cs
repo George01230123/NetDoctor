@@ -166,7 +166,10 @@ internal sealed class RepairView : Panel
 
     private Card BuildFixCard()
     {
-        var c = new Card { Height = 214, Accent2 = Theme.Ok, Margin = new Padding(0, 0, 0, 10) };
+        // 高度要放得下 5 行「立即处理」。原来 214 → 内容区约 170px，
+        // 而 5 行 × 40px = 200px，最后一行会被切掉，且这里 AutoScroll=false，
+        // 切掉就真的看不到了。
+        var c = new Card { Height = 256, Accent2 = Theme.Ok, Margin = new Padding(0, 0, 0, 10) };
         var t = Theme.Lbl("快速处置（针对具体症状，点一下立刻执行）", 10f, Theme.Text, FontStyle.Bold);
         t.Dock = DockStyle.Top; t.Height = 24;
 
@@ -178,6 +181,34 @@ internal sealed class RepairView : Panel
             AutoScroll = false,
             BackColor = Color.Transparent,
         };
+
+        // 每行原来写死 900px 宽、提示标签写死 700px，
+        // 而这一列可用宽度只有 876px（默认窗口）到 576px（最小窗口）——
+        // 行会横向溢出、提示文字被右边缘切掉。
+        // 改成在容器尺寸变化时按实际宽度重排。
+        var fixRows = new List<Panel>();
+
+        void LayoutFixRows()
+        {
+            int avail = flow.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 4;
+            if (avail < 200) return;
+            foreach (var row in fixRows)
+            {
+                row.Width = avail;
+                foreach (Control c in row.Controls)
+                {
+                    if (c is Label lb && lb.Left >= 108)
+                    {
+                        int w = avail - lb.Left - 8;
+                        if (w > 40) lb.Width = w;
+                    }
+                }
+            }
+        }
+        flow.Resize += (_, _) => LayoutFixRows();
+        // 同其它视图：补一次最终布局，避免用到中间宽度
+        this.Resize += (_, _) => BeginInvoke(new Action(LayoutFixRows));
+        HandleCreated += (_, _) => BeginInvoke(new Action(LayoutFixRows));
 
         void AddFix(string symptom, string hint, Func<Task> act)
         {
@@ -191,6 +222,7 @@ internal sealed class RepairView : Panel
             h.SetBounds(108, 20, 700, 18);
             row.Controls.Add(b); row.Controls.Add(s); row.Controls.Add(h);
             flow.Controls.Add(row);
+            fixRows.Add(row);
             _fixBoxes.Add(new CheckBox());  // 占位，保持计数一致（未使用）
         }
 

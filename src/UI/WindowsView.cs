@@ -67,33 +67,50 @@ internal sealed class WindowsView : Panel
         bar.Controls.Add(_progressText);
 
         // ---------------- 按钮条 ----------------
-        var btns = new Panel { Dock = DockStyle.Bottom, Height = 52, BackColor = Color.Transparent };
+        // 这排有 8 个按钮，合计约 940px；而可用宽度默认只有 942px、最小窗口更只剩 634px。
+        // 原来写死坐标（0/142/…/894，累计 1024px）必然溢出，最小窗口下右侧几个按钮
+        // 会被整块切掉。改用流式布局并按实际宽度分布：放不下时自动换行，
+        // 宁可占两行也不让按钮消失。
+        var btns = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            Height = 52,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoScroll = false,
+            BackColor = Color.Transparent,
+            Padding = new Padding(0),
+        };
 
-        var bApply = Theme.Btn("应用勾选项", 130, 38, true);
-        bApply.Location = new Point(0, 6);
+        var bApply = Theme.Btn("应用勾选项", 118, 38, true);
+        bApply.Margin = new Padding(0, 4, 8, 4);
         bApply.Click += async (_, _) => await ApplyChecked();
-        var bRestore = Theme.Btn("还原勾选项", 130, 38);
-        bRestore.Location = new Point(142, 6);
+        var bRestore = Theme.Btn("还原勾选项", 118, 38);
+        bRestore.Margin = new Padding(0, 4, 8, 4);
         bRestore.Click += async (_, _) => await RestoreChecked();
-        var bSelAll = Theme.Btn("全选本页", 100, 38);
-        bSelAll.Location = new Point(284, 6);
+        var bSelAll = Theme.Btn("全选本页", 94, 38);
+        bSelAll.Margin = new Padding(0, 4, 8, 4);
         bSelAll.Click += (_, _) => SetAllCurrentPage(true);
-        var bSelNone = Theme.Btn("全不选", 90, 38);
-        bSelNone.Location = new Point(396, 6);
+        var bSelNone = Theme.Btn("全不选", 84, 38);
+        bSelNone.Margin = new Padding(0, 4, 8, 4);
         bSelNone.Click += (_, _) => SetAllCurrentPage(false);
-        var bSafe = Theme.Btn("只选推荐项", 120, 38);
-        bSafe.Location = new Point(498, 6);
+        var bSafe = Theme.Btn("只选推荐项", 110, 38);
+        bSafe.Margin = new Padding(0, 4, 8, 4);
         bSafe.Click += (_, _) => SelectRecommended();
-        var bRefresh = Theme.Btn("重新检测状态", 130, 38);
-        bRefresh.Location = new Point(630, 6);
+        var bRefresh = Theme.Btn("重新检测状态", 118, 38);
+        bRefresh.Margin = new Padding(0, 4, 8, 4);
         bRefresh.Click += (_, _) => RefreshCurrent(recount: true);
-        var bRestoreAll = Theme.Btn("全部还原", 110, 38);
-        bRestoreAll.Location = new Point(772, 6);
+        var bRestoreAll = Theme.Btn("全部还原", 104, 38);
+        bRestoreAll.Margin = new Padding(0, 4, 8, 4);
         bRestoreAll.Click += async (_, _) => await RestoreAll();
-        var bSnap = Theme.Btn("打开快照目录", 130, 38);
-        bSnap.Location = new Point(894, 6);
+        var bSnap = Theme.Btn("打开快照目录", 118, 38);
+        bSnap.Margin = new Padding(0, 4, 0, 4);
         bSnap.Click += (_, _) => Cmd.Open(Backup.Root);
 
+        // 八个按钮原来写死坐标（0/142/284/…/894），累计需要 1024px，
+        // 而这一行可用宽度只有 942px（默认窗口）到 642px（最小窗口）——
+        // 必然溢出，最小窗口下右侧几个按钮会被整个切掉。
+        // 改为按容器实际宽度自适应间距：先保证两侧留白，再均分剩余空间。
         btns.Controls.Add(bApply); btns.Controls.Add(bRestore); btns.Controls.Add(bSelAll);
         btns.Controls.Add(bSelNone); btns.Controls.Add(bSafe); btns.Controls.Add(bRefresh);
         btns.Controls.Add(bRestoreAll); btns.Controls.Add(bSnap);
@@ -102,10 +119,38 @@ internal sealed class WindowsView : Panel
         _tabs.Dock = DockStyle.Fill;
         _tabs.Font = Theme.F(9f);
         _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-        _tabs.ItemSize = new Size(118, 30);
         _tabs.SizeMode = TabSizeMode.Fixed;
         _tabs.DrawItem += DrawTab;
         _tabs.SelectedIndexChanged += (_, _) => UpdateSummary();
+
+        // 标签宽度按可用宽度分配：7 个分类 × 固定 118px = 826px，
+        // 而内容区最窄只有约 620px —— 溢出 200px，末尾分类的文字会被压扁看不清。
+        // 改为均分可用宽度。
+        bool tabSizing = false;
+        void LayoutTabs()
+        {
+            // 改 ItemSize 会触发布局并再次 Resize，直接改会无限递归（实测栈溢出 0xC0000409）
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            int n = Math.Max(1, _tabs.TabPages.Count);
+            int avail = _tabs.ClientSize.Width - 8;
+            if (avail < 100) return;
+            int w = Math.Max(70, avail / n);
+            if (_tabs.ItemSize.Width == w) return;
+
+            tabSizing = true;
+            try { _tabs.ItemSize = new Size(w, 30); }
+            finally { tabSizing = false; }
+        }
+        _tabs.Resize += (_, _) =>
+        {
+            // 必须先确认句柄已创建：TabControl 在构造期（加入父容器时）就会触发
+            // Resize，此时还没有窗口句柄，直接 BeginInvoke 会抛
+            // 「在创建窗口句柄之前，不能在控件上调用 Invoke 或 BeginInvoke」。
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            _tabs.BeginInvoke(new Action(LayoutTabs));
+        };
+        this.Resize += (_, _) => { if (IsHandleCreated && !tabSizing) BeginInvoke(new Action(LayoutTabs)); };
+        HandleCreated += (_, _) => BeginInvoke(new Action(LayoutTabs));
 
         Controls.Add(_tabs);
         Controls.Add(btns);

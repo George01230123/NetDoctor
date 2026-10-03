@@ -80,17 +80,21 @@ internal sealed class OptimizeView : Panel
         var dnsCard = new Card { Dock = DockStyle.Fill, Accent2 = Theme.Ok, Padding = new Padding(12, 8, 12, 8) };
         var dt = Theme.Lbl("自定义 DNS", 9.5f, Theme.Text, FontStyle.Bold);
         dt.Dock = DockStyle.Top; dt.Height = 22;
-        var flowDns = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 42, BackColor = Color.Transparent };
+        // 高度要容纳换行：三个控件约 504px，窄窗口下会占两行
+        var flowDns = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 80, BackColor = Color.Transparent, WrapContents = true };
         _txtCustom.Font = Theme.F(9f);
         _txtCustom.Width = 250;
         _txtCustom.Height = 26;
+        _txtCustom.Margin = new Padding(0, 8, 10, 0);
         _txtCustom.BackColor = Theme.Card;
         _txtCustom.ForeColor = Theme.Text;
         _txtCustom.BorderStyle = BorderStyle.FixedSingle;
         _txtCustom.Text = "223.5.5.5,223.6.6.6";
         var bApplyC = Theme.Btn("应用", 70, 30, true);
+        bApplyC.Margin = new Padding(0, 6, 10, 0);
         bApplyC.Click += async (_, _) => await ApplyCustom();
         var bRestore = Theme.Btn("恢复自动获取DNS", 140, 30);
+        bRestore.Margin = new Padding(0, 6, 10, 0);
         bRestore.Click += async (_, _) => await Guard(async () =>
         {
             await NetworkOptimizer.RestoreAutoDns();

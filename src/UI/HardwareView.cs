@@ -60,9 +60,41 @@ internal sealed class HardwareView : Panel
         _tabs.Dock = DockStyle.Fill;
         _tabs.Font = Theme.F(9f);
         _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-        _tabs.ItemSize = new Size(126, 30);
         _tabs.SizeMode = TabSizeMode.Fixed;
+        // 同上：按可用宽度统一计算标签宽度
         _tabs.DrawItem += DrawTab;
+        // 标签宽度按可用宽度均分：固定宽度在窄窗口下会把末尾标签压扁。
+        //
+        // ⚠ 改 ItemSize 会让 TabControl 重新布局并再次触发 Resize，
+        //   在 Resize 处理器里直接改就形成无限递归 —— 实测直接把进程
+        //   打成「无法创建新的堆栈防护页面」（栈溢出 0xC0000409）。
+        //   所以：加进行中标志切断递归，并且只在控件已创建时异步改。
+        bool tabSizing = false;
+        void LayoutTabs()
+        {
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            int n = Math.Max(1, _tabs.TabPages.Count);
+            int avail = _tabs.ClientSize.Width - 8;
+            if (avail < 100) return;
+            int w = Math.Max(70, avail / n);
+            if (_tabs.ItemSize.Width == w) return;
+
+            tabSizing = true;
+            try { _tabs.ItemSize = new Size(w, 30); }
+            finally { tabSizing = false; }
+        }
+        _tabs.Resize += (_, _) =>
+        {
+            // 必须先确认句柄已创建：TabControl 在构造期（加入父容器时）就会触发
+            // Resize，此时还没有窗口句柄，直接 BeginInvoke 会抛
+            // 「在创建窗口句柄之前，不能在控件上调用 Invoke 或 BeginInvoke」。
+            // 用 _tabs.IsHandleCreated 而不是 this.IsHandleCreated —— 后者可能已创建，
+            // 而 _tabs 自己的句柄还没建好。
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            _tabs.BeginInvoke(new Action(LayoutTabs));
+        };
+        this.Resize += (_, _) => { if (IsHandleCreated && !tabSizing) BeginInvoke(new Action(LayoutTabs)); };
+        HandleCreated += (_, _) => BeginInvoke(new Action(LayoutTabs));
 
         _tabs.TabPages.Add(BuildHardwarePage());
         _tabs.TabPages.Add(BuildToolPage());

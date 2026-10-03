@@ -72,7 +72,6 @@ internal sealed class SystemToolsView : Panel
         _tabs.Dock = DockStyle.Fill;
         _tabs.Font = Theme.F(9f);
         _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-        _tabs.ItemSize = new Size(120, 30);
         _tabs.SizeMode = TabSizeMode.Fixed;
         _tabs.DrawItem += DrawTab;
 
@@ -82,6 +81,37 @@ internal sealed class SystemToolsView : Panel
         _tabs.TabPages.Add(BuildStartPage());
         _tabs.TabPages.Add(BuildActivatePage());
         _tabs.TabPages.Add(BuildSecurityPage());
+
+        // 标签宽度按可用宽度分配：6 个标签 × 固定 120px = 720px，
+        // 而内容区最窄只有约 620px（最小窗口）—— 最后几个标签会被压扁、
+        // 文字显示不全（加了「安全中心」之后更明显）。
+        // 改为均分可用宽度，窄窗口也能完整显示。
+        bool tabSizing = false;
+        void LayoutTabs()
+        {
+            // 改 ItemSize 会触发布局并再次 Resize，直接改会无限递归（实测栈溢出 0xC0000409）
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            int n = Math.Max(1, _tabs.TabPages.Count);
+            int avail = _tabs.ClientSize.Width - 8;
+            if (avail < 100) return;
+            int w = Math.Max(78, avail / n);
+            if (_tabs.ItemSize.Width == w) return;
+
+            tabSizing = true;
+            try { _tabs.ItemSize = new Size(w, 30); }
+            finally { tabSizing = false; }
+        }
+        _tabs.Resize += (_, _) =>
+        {
+            // 必须先确认句柄已创建：TabControl 在构造期（加入父容器时）就会触发
+            // Resize，此时还没有窗口句柄，直接 BeginInvoke 会抛
+            // 「在创建窗口句柄之前，不能在控件上调用 Invoke 或 BeginInvoke」。
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            _tabs.BeginInvoke(new Action(LayoutTabs));
+        };
+        // 补一次最终布局（构造期宽度还不稳定）
+        this.Resize += (_, _) => { if (IsHandleCreated && !tabSizing) BeginInvoke(new Action(LayoutTabs)); };
+        HandleCreated += (_, _) => BeginInvoke(new Action(LayoutTabs));
 
         Controls.Add(_tabs);
         Controls.Add(bar);
@@ -469,39 +499,53 @@ internal sealed class SystemToolsView : Panel
     {
         var page = new TabPage("系统服务") { BackColor = Theme.Bg, Padding = new Padding(0) };
 
-        var btns = new Panel { Dock = DockStyle.Bottom, Height = 48, BackColor = Color.Transparent };
+        // 这一排 9 个控件合计约 1020px，而可用宽度只有 934px（默认窗口）
+        // 到 634px（最小窗口）——写死坐标时末尾的筛选框与复选框会被整个切掉。
+        // 改用流式布局：放不下自动换行，宁可占两行也不让控件消失。
+        var btns = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom,
+            // 高度要能容纳换行后的第二排（窄窗口时 9 个控件会占两行）
+            Height = 88,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = true,
+            AutoScroll = false,
+            BackColor = Color.Transparent,
+            Padding = new Padding(0),
+        };
         var bLoad = Theme.Btn("刷新", 80, 34, true);
-        bLoad.Location = new Point(0, 6);
+        bLoad.Margin = new Padding(0, 6, 12, 0);
         bLoad.Click += (_, _) => LoadServices();
         var bStart = Theme.Btn("启动", 80, 34);
-        bStart.Location = new Point(92, 6);
+        bStart.Margin = new Padding(0, 6, 12, 0);
         bStart.Click += async (_, _) => await SvcControl(true);
         var bStop = Theme.Btn("停止", 80, 34);
-        bStop.Location = new Point(184, 6);
+        bStop.Margin = new Padding(0, 6, 12, 0);
         bStop.Click += async (_, _) => await SvcControl(false);
         var bAuto = Theme.Btn("设为自动", 100, 34);
-        bAuto.Location = new Point(276, 6);
+        bAuto.Margin = new Padding(0, 6, 12, 0);
         bAuto.Click += async (_, _) => await SvcSet("2");
         var bMan = Theme.Btn("设为手动", 100, 34);
-        bMan.Location = new Point(388, 6);
+        bMan.Margin = new Padding(0, 6, 12, 0);
         bMan.Click += async (_, _) => await SvcSet("3");
         var bDis = Theme.Btn("设为禁用", 100, 34);
-        bDis.Location = new Point(500, 6);
+        bDis.Margin = new Padding(0, 6, 12, 0);
         bDis.Click += async (_, _) => await SvcSet("4");
         var bPropose = Theme.Btn("禁用推荐项", 120, 34);
-        bPropose.Location = new Point(612, 6);
         bPropose.Click += async (_, _) => await SvcDisableRecommended();
 
-        _svcFilter.Location = new Point(748, 10);
-        _svcFilter.Width = 160;
+        _svcFilter.Width = 150;
         _svcFilter.BackColor = Theme.Card;
         _svcFilter.ForeColor = Theme.Text;
         _svcFilter.BorderStyle = BorderStyle.FixedSingle;
         _svcFilter.PlaceholderText = "筛选服务名…";
         _svcFilter.TextChanged += (_, _) => LoadServices();
 
-        _svcMs.Location = new Point(918, 13);
-        _svcMs.CheckedChanged += (_, _) => LoadServices();
+        _svcMs.Margin = new Padding(0, 13, 0, 0);
+
+        // 这一排原来写死坐标，末尾的筛选框与复选框落在 x=918，
+        // 而可用宽度只有 934px（默认窗口）到 634px（最小窗口）——
+        // 复选框会被切掉一大半。改为按容器宽度自适应间距。
 
         btns.Controls.Add(bLoad); btns.Controls.Add(bStart); btns.Controls.Add(bStop);
         btns.Controls.Add(bAuto); btns.Controls.Add(bMan); btns.Controls.Add(bDis);

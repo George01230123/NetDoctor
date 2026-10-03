@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    布局审计工具：程序化测量每个控件的实际边界，找出越界 / 重叠 / 被裁切。
+    逐张看图靠肉眼容易漏，这里用坐标说话。
+
+    引用 src 的源码而不是 exe，这样能直接遍历控件树。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>NetDoctorLayoutAudit</AssemblyName>
+    <RootNamespace>NetDoctorTest</RootNamespace>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <NoWarn>CA1416;WFO1000;WFO0003;WFO5001</NoWarn>
+    <DebugType>none</DebugType>
+    <ApplicationHighDpiMode>DpiUnaware</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 只引入 Core 与 UI（含 MainForm，审计要用它的 ShowView 才能复现真实布局）；
+         排除 Program.cs 以免与审计工具自己的入口冲突 -->
+    <Compile Include="..\src\Core\**\*.cs" LinkBase="src\Core" />
+    <Compile Include="..\src\UI\**\*.cs" LinkBase="src\UI" />
+    <Compile Include="..\src\Theme.cs" LinkBase="src" />
+    <EmbeddedResource Include="..\src\Core\nettop.ps1" LogicalName="NetDoctor.Data.nettop.ps1" />
+    <EmbeddedResource Include="..\src\Core\sysitems.ps1" LogicalName="NetDoctor.Data.sysitems.ps1" />
+    <EmbeddedResource Include="..\src\Data\Optimizations.xml" LogicalName="NetDoctor.Data.Optimizations.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

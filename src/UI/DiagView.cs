@@ -25,46 +25,113 @@ internal sealed class DiagView : Panel
 
         // ---------- 顶部 ----------
         var head = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = Color.Transparent };
+
+        // 用 TableLayoutPanel 分三列：标题(定宽) | 摘要(填满) | 按钮(自动宽)。
+        // 这样可以彻底避开 Dock 顺序与手工坐标的问题 —— 之前两版分别因为
+        // 「head.Width 构造期不稳定」和「Fill 抢走整行宽度」而失败。
+        var headTbl = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            RowCount = 1,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+        };
+        headTbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 200f));
+        headTbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        headTbl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        headTbl.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
         var t = Theme.Lbl("网络检测", 15f, Theme.Text, FontStyle.Bold);
-        t.SetBounds(0, 0, 200, 40);
+        t.Dock = DockStyle.Fill;
+        t.TextAlign = ContentAlignment.MiddleLeft;
+        t.Margin = new Padding(0);
+
         _summary = Theme.Lbl("尚未检测", 9.5f, Theme.SubText);
-        _summary.SetBounds(210, 6, 500, 30);
+        _summary.Dock = DockStyle.Fill;
         _summary.TextAlign = ContentAlignment.MiddleLeft;
+        _summary.Margin = new Padding(6, 0, 6, 0);
+        _summary.AutoEllipsis = true;      // 文字过长时省略，而不是溢出压住按钮
+
+        // 右侧按钮条：AutoSize 让它自己撑开，不会被父容器裁切
+        var rightBar = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            BackColor = Color.Transparent,
+            Margin = new Padding(0),
+            Padding = new Padding(0, 6, 0, 0),
+        };
 
         var bRun = Theme.Btn("开始全面检测", 130, 34, true);
-        bRun.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        bRun.SetBounds(head.Width - 130, 3, 130, 34);
-        head.Resize += (_, _) => bRun.Left = head.Width - 130;
+        bRun.Margin = new Padding(0, 0, 10, 0);
         bRun.Click += async (_, _) => await RunFullAsync(false);
 
         var bExp = Theme.Btn("导出报告", 100, 34);
-        bExp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        bExp.SetBounds(head.Width - 240, 3, 100, 34);
-        head.Resize += (_, _) => bExp.Left = head.Width - 240;
+        bExp.Margin = new Padding(0, 0, 10, 0);
         bExp.Click += (_, _) => ExportReport();
 
         var bCopy = Theme.Btn("复制摘要", 100, 34);
-        bCopy.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        bCopy.SetBounds(head.Width - 350, 3, 100, 34);
-        head.Resize += (_, _) => bCopy.Left = head.Width - 350;
+        bCopy.Margin = new Padding(0, 0, 10, 0);
         bCopy.Click += (_, _) => CopySummary();
 
         var bFix = Theme.Btn("去修复", 90, 34);
-        bFix.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        bFix.SetBounds(head.Width - 450, 3, 90, 34);
-        head.Resize += (_, _) => bFix.Left = head.Width - 450;
+        bFix.Margin = new Padding(0);
         bFix.Click += (_, _) => _main.ShowView("repair");
 
-        head.Controls.Add(t); head.Controls.Add(_summary);
-        head.Controls.Add(bRun); head.Controls.Add(bExp); head.Controls.Add(bCopy); head.Controls.Add(bFix);
+        rightBar.Controls.Add(bFix);
+        rightBar.Controls.Add(bCopy);
+        rightBar.Controls.Add(bExp);
+        rightBar.Controls.Add(bRun);
+
+        headTbl.Controls.Add(t, 0, 0);
+        headTbl.Controls.Add(_summary, 1, 0);
+        headTbl.Controls.Add(rightBar, 2, 0);
+        head.Controls.Add(headTbl);
 
         // ---------- 下方标签页 ----------
         _tabs.Dock = DockStyle.Fill;
         _tabs.Font = Theme.F(9f);
         _tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-        _tabs.ItemSize = new Size(120, 30);
         _tabs.SizeMode = TabSizeMode.Fixed;
+        // 标签宽度按可用宽度分配（4 个 × 120 = 480px，最小窗口时可用约 620px 尚可，
+        // 但统一按可用宽度算，避免以后加标签又溢出）
         _tabs.DrawItem += Tabs_DrawItem;
+        // 标签宽度按可用宽度均分：固定宽度在窄窗口下会把末尾标签压扁。
+        //
+        // ⚠ 改 ItemSize 会让 TabControl 重新布局并再次触发 Resize，
+        //   在 Resize 处理器里直接改就形成无限递归 —— 实测直接把进程
+        //   打成「无法创建新的堆栈防护页面」（栈溢出 0xC0000409）。
+        //   所以：加进行中标志切断递归，并且只在控件已创建时异步改。
+        bool tabSizing = false;
+        void LayoutTabs()
+        {
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            int n = Math.Max(1, _tabs.TabPages.Count);
+            int avail = _tabs.ClientSize.Width - 8;
+            if (avail < 100) return;
+            int w = Math.Max(70, avail / n);
+            if (_tabs.ItemSize.Width == w) return;
+
+            tabSizing = true;
+            try { _tabs.ItemSize = new Size(w, 30); }
+            finally { tabSizing = false; }
+        }
+        _tabs.Resize += (_, _) =>
+        {
+            // 必须先确认句柄已创建：TabControl 在构造期（加入父容器时）就会触发
+            // Resize，此时还没有窗口句柄，直接 BeginInvoke 会抛
+            // 「在创建窗口句柄之前，不能在控件上调用 Invoke 或 BeginInvoke」。
+            // 用 _tabs.IsHandleCreated 而不是 this.IsHandleCreated —— 后者可能已创建，
+            // 而 _tabs 自己的句柄还没建好。
+            if (tabSizing || !_tabs.IsHandleCreated) return;
+            _tabs.BeginInvoke(new Action(LayoutTabs));
+        };
+        this.Resize += (_, _) => { if (IsHandleCreated && !tabSizing) BeginInvoke(new Action(LayoutTabs)); };
+        HandleCreated += (_, _) => BeginInvoke(new Action(LayoutTabs));
 
         // Tab1: 检测结果
         _checks.Dock = DockStyle.Fill;
